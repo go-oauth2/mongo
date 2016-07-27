@@ -81,20 +81,13 @@ func (ts *TokenStore) c(name string) *mgo.Collection {
 
 // Create Create and store the new token information
 func (ts *TokenStore) Create(info oauth2.TokenInfo) (err error) {
-	var expiredAt time.Time
+	aexp := info.GetAccessCreateAt().Add(info.GetAccessExpiresIn())
+	rexp := aexp
 	if refresh := info.GetRefresh(); refresh != "" {
-		expiredAt = info.GetRefreshCreateAt().Add(info.GetRefreshExpiresIn())
-		rinfo, rerr := ts.GetByRefresh(refresh)
-		if rerr != nil {
-			err = rerr
-			return
+		rexp = info.GetRefreshCreateAt().Add(info.GetRefreshExpiresIn())
+		if aexp.Second() > rexp.Second() {
+			aexp = rexp
 		}
-		if rinfo != nil {
-			expiredAt = rinfo.GetRefreshCreateAt().Add(rinfo.GetRefreshExpiresIn())
-		}
-	}
-	if expiredAt.IsZero() {
-		expiredAt = info.GetAccessCreateAt().Add(info.GetAccessExpiresIn())
 	}
 	id := bson.NewObjectId().Hex()
 	jv, err := json.Marshal(info)
@@ -108,7 +101,7 @@ func (ts *TokenStore) Create(info oauth2.TokenInfo) (err error) {
 		Assert: txn.DocMissing,
 		Insert: basicData{
 			Data:      jv,
-			ExpiredAt: expiredAt,
+			ExpiredAt: rexp,
 		},
 	}, {
 		C:      ts.tcfg.AccessCName,
@@ -116,7 +109,7 @@ func (ts *TokenStore) Create(info oauth2.TokenInfo) (err error) {
 		Assert: txn.DocMissing,
 		Insert: tokenData{
 			BasicID:   id,
-			ExpiredAt: info.GetAccessCreateAt().Add(info.GetAccessExpiresIn()),
+			ExpiredAt: aexp,
 		},
 	}}
 	if refresh := info.GetRefresh(); refresh != "" {
@@ -126,7 +119,7 @@ func (ts *TokenStore) Create(info oauth2.TokenInfo) (err error) {
 			Assert: txn.DocMissing,
 			Insert: tokenData{
 				BasicID:   id,
-				ExpiredAt: expiredAt,
+				ExpiredAt: rexp,
 			},
 		})
 	}
