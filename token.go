@@ -81,6 +81,20 @@ func (ts *TokenStore) c(name string) *mgo.Collection {
 
 // Create Create and store the new token information
 func (ts *TokenStore) Create(info oauth2.TokenInfo) (err error) {
+	jv, err := json.Marshal(info)
+	if err != nil {
+		return
+	}
+
+	if code := info.GetCode(); code != "" {
+		err = ts.c(ts.tcfg.BasicCName).Insert(basicData{
+			ID:        code,
+			Data:      jv,
+			ExpiredAt: info.GetCodeCreateAt().Add(info.GetCodeExpiresIn()),
+		})
+		return
+	}
+
 	aexp := info.GetAccessCreateAt().Add(info.GetAccessExpiresIn())
 	rexp := aexp
 	if refresh := info.GetRefresh(); refresh != "" {
@@ -90,10 +104,6 @@ func (ts *TokenStore) Create(info oauth2.TokenInfo) (err error) {
 		}
 	}
 	id := bson.NewObjectId().Hex()
-	jv, err := json.Marshal(info)
-	if err != nil {
-		return
-	}
 	runner := txn.NewRunner(ts.c(ts.tcfg.TxnCName))
 	ops := []txn.Op{{
 		C:      ts.tcfg.BasicCName,
@@ -127,6 +137,18 @@ func (ts *TokenStore) Create(info oauth2.TokenInfo) (err error) {
 	return
 }
 
+// RemoveByCode Use the authorization code to delete the token information
+func (ts *TokenStore) RemoveByCode(code string) (err error) {
+	verr := ts.c(ts.tcfg.BasicCName).RemoveId(code)
+	if verr != nil {
+		if verr == mgo.ErrNotFound {
+			return
+		}
+		err = verr
+	}
+	return
+}
+
 // RemoveByAccess Use the access token to delete the token information
 func (ts *TokenStore) RemoveByAccess(access string) (err error) {
 	verr := ts.c(ts.tcfg.AccessCName).RemoveId(access)
@@ -151,19 +173,9 @@ func (ts *TokenStore) RemoveByRefresh(refresh string) (err error) {
 	return
 }
 
-// get
-func (ts *TokenStore) get(cname, token string) (ti oauth2.TokenInfo, err error) {
-	var td tokenData
-	verr := ts.c(cname).FindId(token).One(&td)
-	if verr != nil {
-		if verr == mgo.ErrNotFound {
-			return
-		}
-		err = verr
-		return
-	}
+func (ts *TokenStore) getData(basicID string) (ti oauth2.TokenInfo, err error) {
 	var bd basicData
-	verr = ts.c(ts.tcfg.BasicCName).FindId(td.BasicID).One(&bd)
+	verr := ts.c(ts.tcfg.BasicCName).FindId(basicID).One(&bd)
 	if verr != nil {
 		if verr == mgo.ErrNotFound {
 			return
@@ -180,15 +192,43 @@ func (ts *TokenStore) get(cname, token string) (ti oauth2.TokenInfo, err error) 
 	return
 }
 
+func (ts *TokenStore) getBasicID(cname, token string) (basicID string, err error) {
+	var td tokenData
+	verr := ts.c(cname).FindId(token).One(&td)
+	if verr != nil {
+		if verr == mgo.ErrNotFound {
+			return
+		}
+		err = verr
+		return
+	}
+	basicID = td.BasicID
+	return
+}
+
+// GetByCode Use the authorization code for token information data
+func (ts *TokenStore) GetByCode(code string) (ti oauth2.TokenInfo, err error) {
+	ti, err = ts.getData(code)
+	return
+}
+
 // GetByAccess Use the access token for token information data
 func (ts *TokenStore) GetByAccess(access string) (ti oauth2.TokenInfo, err error) {
-	ti, err = ts.get(ts.tcfg.AccessCName, access)
+	basicID, err := ts.getBasicID(ts.tcfg.AccessCName, access)
+	if err != nil && basicID == "" {
+		return
+	}
+	ti, err = ts.getData(basicID)
 	return
 }
 
 // GetByRefresh Use the refresh token for token information data
 func (ts *TokenStore) GetByRefresh(refresh string) (ti oauth2.TokenInfo, err error) {
-	ti, err = ts.get(ts.tcfg.RefreshCName, refresh)
+	basicID, err := ts.getBasicID(ts.tcfg.RefreshCName, refresh)
+	if err != nil && basicID == "" {
+		return
+	}
+	ti, err = ts.getData(basicID)
 	return
 }
 

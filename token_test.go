@@ -16,6 +16,31 @@ func TestTokenStore(t *testing.T) {
 		store, err := mongo.NewTokenStore(mcfg)
 		So(err, ShouldBeNil)
 
+		Convey("Test authorization code store", func() {
+			info := &models.Token{
+				ClientID:      "1",
+				UserID:        "1_1",
+				RedirectURI:   "http://localhost/",
+				Scope:         "all",
+				Code:          "11_11_11",
+				CodeCreateAt:  time.Now(),
+				CodeExpiresIn: time.Second * 5,
+			}
+			err := store.Create(info)
+			So(err, ShouldBeNil)
+
+			cinfo, err := store.GetByCode(info.Code)
+			So(err, ShouldBeNil)
+			So(cinfo.GetUserID(), ShouldEqual, info.UserID)
+
+			err = store.RemoveByCode(info.Code)
+			So(err, ShouldBeNil)
+
+			cinfo, err = store.GetByCode(info.Code)
+			So(err, ShouldBeNil)
+			So(cinfo, ShouldBeNil)
+		})
+
 		Convey("Test access token store", func() {
 			info := &models.Token{
 				ClientID:        "1",
@@ -52,7 +77,7 @@ func TestTokenStore(t *testing.T) {
 				AccessExpiresIn:  time.Second * 5,
 				Refresh:          "1_2_2",
 				RefreshCreateAt:  time.Now(),
-				RefreshExpiresIn: time.Minute * 1,
+				RefreshExpiresIn: time.Second * 15,
 			}
 			err := store.Create(info)
 			So(err, ShouldBeNil)
