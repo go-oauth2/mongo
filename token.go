@@ -79,6 +79,13 @@ func (ts *TokenStore) c(name string) *mgo.Collection {
 	return ts.session.DB(ts.mcfg.DB).C(name)
 }
 
+func (ts *TokenStore) cHandler(name string, handler func(c *mgo.Collection)) {
+	session := ts.session.Clone()
+	defer session.Close()
+	handler(session.DB(ts.mcfg.DB).C(name))
+	return
+}
+
 // Create Create and store the new token information
 func (ts *TokenStore) Create(info oauth2.TokenInfo) (err error) {
 	jv, err := json.Marshal(info)
@@ -87,10 +94,12 @@ func (ts *TokenStore) Create(info oauth2.TokenInfo) (err error) {
 	}
 
 	if code := info.GetCode(); code != "" {
-		err = ts.c(ts.tcfg.BasicCName).Insert(basicData{
-			ID:        code,
-			Data:      jv,
-			ExpiredAt: info.GetCodeCreateAt().Add(info.GetCodeExpiresIn()),
+		ts.cHandler(ts.tcfg.BasicCName, func(c *mgo.Collection) {
+			err = c.Insert(basicData{
+				ID:        code,
+				Data:      jv,
+				ExpiredAt: info.GetCodeCreateAt().Add(info.GetCodeExpiresIn()),
+			})
 		})
 		return
 	}
@@ -104,7 +113,6 @@ func (ts *TokenStore) Create(info oauth2.TokenInfo) (err error) {
 		}
 	}
 	id := bson.NewObjectId().Hex()
-	runner := txn.NewRunner(ts.c(ts.tcfg.TxnCName))
 	ops := []txn.Op{{
 		C:      ts.tcfg.BasicCName,
 		Id:     id,
@@ -133,76 +141,89 @@ func (ts *TokenStore) Create(info oauth2.TokenInfo) (err error) {
 			},
 		})
 	}
-	err = runner.Run(ops, "", nil)
+	ts.cHandler(ts.tcfg.TxnCName, func(c *mgo.Collection) {
+		runner := txn.NewRunner(c)
+		err = runner.Run(ops, "", nil)
+	})
 	return
 }
 
 // RemoveByCode Use the authorization code to delete the token information
 func (ts *TokenStore) RemoveByCode(code string) (err error) {
-	verr := ts.c(ts.tcfg.BasicCName).RemoveId(code)
-	if verr != nil {
-		if verr == mgo.ErrNotFound {
-			return
+	ts.cHandler(ts.tcfg.BasicCName, func(c *mgo.Collection) {
+		verr := c.RemoveId(code)
+		if verr != nil {
+			if verr == mgo.ErrNotFound {
+				return
+			}
+			err = verr
 		}
-		err = verr
-	}
+	})
 	return
 }
 
 // RemoveByAccess Use the access token to delete the token information
 func (ts *TokenStore) RemoveByAccess(access string) (err error) {
-	verr := ts.c(ts.tcfg.AccessCName).RemoveId(access)
-	if verr != nil {
-		if verr == mgo.ErrNotFound {
-			return
+	ts.cHandler(ts.tcfg.AccessCName, func(c *mgo.Collection) {
+		verr := c.RemoveId(access)
+		if verr != nil {
+			if verr == mgo.ErrNotFound {
+				return
+			}
+			err = verr
 		}
-		err = verr
-	}
+	})
 	return
 }
 
 // RemoveByRefresh Use the refresh token to delete the token information
 func (ts *TokenStore) RemoveByRefresh(refresh string) (err error) {
-	verr := ts.c(ts.tcfg.RefreshCName).RemoveId(refresh)
-	if verr != nil {
-		if verr == mgo.ErrNotFound {
-			return
+	ts.cHandler(ts.tcfg.RefreshCName, func(c *mgo.Collection) {
+		verr := c.RemoveId(refresh)
+		if verr != nil {
+			if verr == mgo.ErrNotFound {
+				return
+			}
+			err = verr
 		}
-		err = verr
-	}
+	})
 	return
 }
 
 func (ts *TokenStore) getData(basicID string) (ti oauth2.TokenInfo, err error) {
-	var bd basicData
-	verr := ts.c(ts.tcfg.BasicCName).FindId(basicID).One(&bd)
-	if verr != nil {
-		if verr == mgo.ErrNotFound {
+	ts.cHandler(ts.tcfg.BasicCName, func(c *mgo.Collection) {
+		var bd basicData
+		verr := c.FindId(basicID).One(&bd)
+		if verr != nil {
+			if verr == mgo.ErrNotFound {
+				return
+			}
+			err = verr
 			return
 		}
-		err = verr
-		return
-	}
-	var tm models.Token
-	err = json.Unmarshal(bd.Data, &tm)
-	if err != nil {
-		return
-	}
-	ti = &tm
+		var tm models.Token
+		err = json.Unmarshal(bd.Data, &tm)
+		if err != nil {
+			return
+		}
+		ti = &tm
+	})
 	return
 }
 
 func (ts *TokenStore) getBasicID(cname, token string) (basicID string, err error) {
-	var td tokenData
-	verr := ts.c(cname).FindId(token).One(&td)
-	if verr != nil {
-		if verr == mgo.ErrNotFound {
+	ts.cHandler(cname, func(c *mgo.Collection) {
+		var td tokenData
+		verr := c.FindId(token).One(&td)
+		if verr != nil {
+			if verr == mgo.ErrNotFound {
+				return
+			}
+			err = verr
 			return
 		}
-		err = verr
-		return
-	}
-	basicID = td.BasicID
+		basicID = td.BasicID
+	})
 	return
 }
 
