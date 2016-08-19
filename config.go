@@ -1,12 +1,12 @@
 package mongo
 
-// Config MongoDB Config
+// Config mongodb configuration parameters
 type Config struct {
 	URL string
 	DB  string
 }
 
-// NewConfig Create MongoDB Config
+// NewConfig create mongodb configuration
 func NewConfig(url, db string) *Config {
 	return &Config{
 		URL: url,

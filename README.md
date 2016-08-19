@@ -1,18 +1,18 @@
-MongoDB Storage for OAuth2
-==========================
+# MongoDB Storage for OAuth 2.0
 
-[![GoDoc](https://godoc.org/github.com/go-oauth2/mongo?status.svg)](https://godoc.org/github.com/go-oauth2/mongo)
-[![Go Report Card](https://goreportcard.com/badge/github.com/go-oauth2/mongo)](https://goreportcard.com/report/github.com/go-oauth2/mongo)
+> Based on the redis token storage
 
-Install
--------
+[![License][License-Image]][License-Url] 
+[![ReportCard][ReportCard-Image]][ReportCard-Url] 
+[![GoDoc][GoDoc-Image]][GoDoc-Url]
+
+## Install
 
 ``` bash
-$ go get -u -v github.com/go-oauth2/mongo
+$ go get -u github.com/go-oauth2/mongo
 ```
 
-Usage
------
+## Usage
 
 ``` go
 package main
@@ -25,17 +25,25 @@ import (
 func main() {
 	manager := manage.NewDefaultManager()
 	// use mongodb token store
-    mcfg := mongo.NewConfig("mongodb://admin:123456@192.168.33.70:27017", "oauth2")
-	manager.MustTokenStorage(mongo.NewTokenStore(mcfg))
-
+	manager.MustTokenStorage(
+		mongo.NewTokenStore(mongo.NewConfig(
+			"mongodb://127.0.0.1:27017",
+			"oauth2",
+		)),
+	)
 	// ...
 }
 ```
 
-License
--------
+## MIT License
 
 ```
-Copyright (c) 2016, OAuth 2.0
-All rights reserved.
+Copyright (c) 2016 Lyric
 ```
+
+[License-Url]: http://opensource.org/licenses/MIT
+[License-Image]: https://img.shields.io/npm/l/express.svg
+[ReportCard-Url]: https://goreportcard.com/report/github.com/go-oauth2/mongo
+[ReportCard-Image]: https://goreportcard.com/badge/github.com/go-oauth2/mongo
+[GoDoc-Url]: https://godoc.org/github.com/go-oauth2/mongo
+[GoDoc-Image]: https://godoc.org/github.com/go-oauth2/mongo?status.svg

@@ -12,7 +12,7 @@ import (
 
 func TestTokenStore(t *testing.T) {
 	Convey("Test mongodb token store", t, func() {
-		mcfg := mongo.NewConfig("mongodb://admin:123456@192.168.33.70:27017", "oauth2")
+		mcfg := mongo.NewConfig("mongodb://127.0.0.1:27017", "oauth2")
 		store, err := mongo.NewTokenStore(mcfg)
 		So(err, ShouldBeNil)
 
