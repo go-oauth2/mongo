@@ -1,6 +1,6 @@
 # MongoDB Storage for OAuth 2.0
 
-> Based on the redis token storage
+> Based on the mongodb token storage
 
 [![License][License-Image]][License-Url] 
 [![ReportCard][ReportCard-Image]][ReportCard-Url] 
