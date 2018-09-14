@@ -1,20 +1,22 @@
-package mongo_test
+package mongo
 
 import (
 	"testing"
 	"time"
 
-	"gopkg.in/go-oauth2/mongo.v1"
 	"gopkg.in/oauth2.v3/models"
 
 	. "github.com/smartystreets/goconvey/convey"
 )
 
+const (
+	url    = "127.0.0.1:27017"
+	dbName = "mydb_test"
+)
+
 func TestTokenStore(t *testing.T) {
 	Convey("Test mongodb token store", t, func() {
-		mcfg := mongo.NewConfig("mongodb://127.0.0.1:27017", "oauth2")
-		store, err := mongo.NewTokenStore(mcfg)
-		So(err, ShouldBeNil)
+		store := NewTokenStore(NewConfig(url, dbName))
 
 		Convey("Test authorization code store", func() {
 			info := &models.Token{

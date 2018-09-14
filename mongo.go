@@ -4,12 +4,26 @@ import (
 	"encoding/json"
 	"time"
 
-	"gopkg.in/mgo.v2"
-	"gopkg.in/mgo.v2/bson"
-	"gopkg.in/mgo.v2/txn"
+	"github.com/globalsign/mgo"
+	"github.com/globalsign/mgo/bson"
+	"github.com/globalsign/mgo/txn"
 	"gopkg.in/oauth2.v3"
 	"gopkg.in/oauth2.v3/models"
 )
+
+// Config mongodb configuration parameters
+type Config struct {
+	URL string
+	DB  string
+}
+
+// NewConfig create mongodb configuration
+func NewConfig(url, db string) *Config {
+	return &Config{
+		URL: url,
+		DB:  db,
+	}
+}
 
 // TokenConfig token configuration parameters
 type TokenConfig struct {
@@ -34,40 +48,41 @@ func NewDefaultTokenConfig() *TokenConfig {
 }
 
 // NewTokenStore create a token store instance based on mongodb
-func NewTokenStore(cfg *Config, tcfgs ...*TokenConfig) (store oauth2.TokenStore, err error) {
+func NewTokenStore(cfg *Config, tcfgs ...*TokenConfig) (store *TokenStore) {
+	session, err := mgo.Dial(cfg.URL)
+	if err != nil {
+		panic(err)
+	}
+
+	return NewTokenStoreWithSession(session, cfg.DB, tcfgs...)
+}
+
+// NewTokenStoreWithSession create a token store instance based on mongodb
+func NewTokenStoreWithSession(session *mgo.Session, dbName string, tcfgs ...*TokenConfig) (store *TokenStore) {
 	ts := &TokenStore{
-		mcfg: cfg,
-		tcfg: NewDefaultTokenConfig(),
+		dbName:  dbName,
+		session: session,
+		tcfg:    NewDefaultTokenConfig(),
 	}
 	if len(tcfgs) > 0 {
 		ts.tcfg = tcfgs[0]
 	}
-	session, err := mgo.Dial(ts.mcfg.URL)
-	if err != nil {
-		return
-	}
-	ts.session = session
-	err = ts.c(ts.tcfg.BasicCName).EnsureIndex(mgo.Index{
+
+	ts.c(ts.tcfg.BasicCName).EnsureIndex(mgo.Index{
 		Key:         []string{"ExpiredAt"},
 		ExpireAfter: time.Second * 1,
 	})
-	if err != nil {
-		return
-	}
-	err = ts.c(ts.tcfg.AccessCName).EnsureIndex(mgo.Index{
+
+	ts.c(ts.tcfg.AccessCName).EnsureIndex(mgo.Index{
 		Key:         []string{"ExpiredAt"},
 		ExpireAfter: time.Second * 1,
 	})
-	if err != nil {
-		return
-	}
-	err = ts.c(ts.tcfg.RefreshCName).EnsureIndex(mgo.Index{
+
+	ts.c(ts.tcfg.RefreshCName).EnsureIndex(mgo.Index{
 		Key:         []string{"ExpiredAt"},
 		ExpireAfter: time.Second * 1,
 	})
-	if err != nil {
-		return
-	}
+
 	store = ts
 	return
 }
@@ -75,18 +90,23 @@ func NewTokenStore(cfg *Config, tcfgs ...*TokenConfig) (store oauth2.TokenStore,
 // TokenStore MongoDB storage for OAuth 2.0
 type TokenStore struct {
 	tcfg    *TokenConfig
-	mcfg    *Config
+	dbName  string
 	session *mgo.Session
 }
 
+// Close close the mongo session
+func (ts *TokenStore) Close() {
+	ts.session.Close()
+}
+
 func (ts *TokenStore) c(name string) *mgo.Collection {
-	return ts.session.DB(ts.mcfg.DB).C(name)
+	return ts.session.DB(ts.dbName).C(name)
 }
 
 func (ts *TokenStore) cHandler(name string, handler func(c *mgo.Collection)) {
 	session := ts.session.Clone()
 	defer session.Close()
-	handler(session.DB(ts.mcfg.DB).C(name))
+	handler(session.DB(ts.dbName).C(name))
 	return
 }
 
