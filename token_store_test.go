@@ -9,11 +9,6 @@ import (
 	. "github.com/smartystreets/goconvey/convey"
 )
 
-const (
-	url    = "127.0.0.1:27017"
-	dbName = "mydb_test"
-)
-
 func TestTokenStore(t *testing.T) {
 	Convey("Test mongodb token store", t, func() {
 		store := NewTokenStore(NewConfig(url, dbName))

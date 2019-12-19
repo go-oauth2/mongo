@@ -11,20 +11,6 @@ import (
 	"gopkg.in/oauth2.v3/models"
 )
 
-// Config mongodb configuration parameters
-type Config struct {
-	URL string
-	DB  string
-}
-
-// NewConfig create mongodb configuration
-func NewConfig(url, db string) *Config {
-	return &Config{
-		URL: url,
-		DB:  db,
-	}
-}
-
 // TokenConfig token configuration parameters
 type TokenConfig struct {
 	// store txn collection name(The default is oauth2)
@@ -68,17 +54,17 @@ func NewTokenStoreWithSession(session *mgo.Session, dbName string, tcfgs ...*Tok
 		ts.tcfg = tcfgs[0]
 	}
 
-	ts.c(ts.tcfg.BasicCName).EnsureIndex(mgo.Index{
+	_ = ts.c(ts.tcfg.BasicCName).EnsureIndex(mgo.Index{
 		Key:         []string{"ExpiredAt"},
 		ExpireAfter: time.Second * 1,
 	})
 
-	ts.c(ts.tcfg.AccessCName).EnsureIndex(mgo.Index{
+	_ = ts.c(ts.tcfg.AccessCName).EnsureIndex(mgo.Index{
 		Key:         []string{"ExpiredAt"},
 		ExpireAfter: time.Second * 1,
 	})
 
-	ts.c(ts.tcfg.RefreshCName).EnsureIndex(mgo.Index{
+	_ = ts.c(ts.tcfg.RefreshCName).EnsureIndex(mgo.Index{
 		Key:         []string{"ExpiredAt"},
 		ExpireAfter: time.Second * 1,
 	})
