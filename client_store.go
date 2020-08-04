@@ -1,6 +1,7 @@
 package mongo
 
 import (
+	"context"
 	"github.com/globalsign/mgo"
 	"gopkg.in/oauth2.v3"
 	"gopkg.in/oauth2.v3/models"
@@ -67,7 +68,7 @@ func (cs *ClientStore) cHandler(name string, handler func(c *mgo.Collection)) {
 }
 
 // Set set client information
-func (cs *ClientStore) Set(info oauth2.ClientInfo) (err error) {
+func (cs *ClientStore) Set(ctx context.Context, info oauth2.ClientInfo) (err error) {
 	cs.cHandler(cs.ccfg.ClientsCName, func(c *mgo.Collection) {
 		entity := &client{
 			ID:     info.GetID(),
@@ -86,7 +87,7 @@ func (cs *ClientStore) Set(info oauth2.ClientInfo) (err error) {
 }
 
 // GetByID according to the ID for the client information
-func (cs *ClientStore) GetByID(id string) (info oauth2.ClientInfo, err error) {
+func (cs *ClientStore) GetByID(ctx context.Context, id string) (info oauth2.ClientInfo, err error) {
 	cs.cHandler(cs.ccfg.ClientsCName, func(c *mgo.Collection) {
 		entity := new(client)
 
@@ -107,7 +108,7 @@ func (cs *ClientStore) GetByID(id string) (info oauth2.ClientInfo, err error) {
 }
 
 // RemoveByID use the client id to delete the client information
-func (cs *ClientStore) RemoveByID(id string) (err error) {
+func (cs *ClientStore) RemoveByID(ctx context.Context, id string) (err error) {
 	cs.cHandler(cs.ccfg.ClientsCName, func(c *mgo.Collection) {
 		if cerr := c.RemoveId(id); cerr != nil {
 			err = cerr

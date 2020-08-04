@@ -1,14 +1,15 @@
 package mongo
 
 import (
-	"testing"
-
+	"context"
 	. "github.com/smartystreets/goconvey/convey"
 	"gopkg.in/oauth2.v3/models"
+	"testing"
 )
 
 func TestClientStore(t *testing.T) {
 	store := NewClientStore(NewConfig(url, dbName))
+	ctx := context.Background()
 
 	client := &models.Client{
 		ID:     "id",
@@ -19,18 +20,18 @@ func TestClientStore(t *testing.T) {
 
 	Convey("Set", t, func() {
 		Convey("HappyPath", func() {
-			_ = store.RemoveByID(client.ID)
+			_ = store.RemoveByID(ctx,client.ID)
 
-			err := store.Set(client)
+			err := store.Set(ctx,client)
 
 			So(err, ShouldBeNil)
 		})
 
 		Convey("AlreadyExistingClient", func() {
-			_ = store.RemoveByID(client.ID)
+			_ = store.RemoveByID(ctx,client.ID)
 
-			_ = store.Set(client)
-			err := store.Set(client)
+			_ = store.Set(ctx,client)
+			err := store.Set(ctx,client)
 
 			So(err, ShouldNotBeNil)
 		})
@@ -38,17 +39,17 @@ func TestClientStore(t *testing.T) {
 
 	Convey("GetByID", t, func() {
 		Convey("HappyPath", func() {
-			_ = store.RemoveByID(client.ID)
-			_ = store.Set(client)
+			_ = store.RemoveByID(ctx,client.ID)
+			_ = store.Set(ctx,client)
 
-			got, err := store.GetByID(client.ID)
+			got, err := store.GetByID(ctx,client.ID)
 
 			So(err, ShouldBeNil)
 			So(got, ShouldResemble, client)
 		})
 
 		Convey("UnknownClient", func() {
-			_, err := store.GetByID("unknown_client")
+			_, err := store.GetByID(ctx,"unknown_client")
 
 			So(err, ShouldNotBeNil)
 		})
@@ -56,7 +57,7 @@ func TestClientStore(t *testing.T) {
 
 	Convey("RemoveByID", t, func() {
 		Convey("UnknownClient", func() {
-			err := store.RemoveByID("unknown_client")
+			err := store.RemoveByID(ctx, "unknown_client")
 
 			So(err, ShouldNotBeNil)
 		})
