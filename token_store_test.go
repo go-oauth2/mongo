@@ -2,17 +2,16 @@ package mongo
 
 import (
 	"context"
-	"gopkg.in/oauth2.v3/models"
+	"github.com/go-oauth2/oauth2/v4/models"
+	. "github.com/smartystreets/goconvey/convey"
 	"testing"
 	"time"
-
-	. "github.com/smartystreets/goconvey/convey"
 )
 
 func TestTokenStore(t *testing.T) {
 	Convey("Test mongodb token store", t, func() {
 		store := NewTokenStore(NewConfig(url, dbName))
-		ctx:= context.Background()
+		ctx := context.Background()
 
 		Convey("Test authorization code store", func() {
 			info := &models.Token{
