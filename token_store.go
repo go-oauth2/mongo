@@ -34,13 +34,13 @@ func NewDefaultTokenConfig() *TokenConfig {
 }
 
 // NewTokenStore create a token store instance based on mongodb
-func NewTokenStore(cfg *Config, tcfgs ...*TokenConfig) (store *TokenStore, err error) {
+	func NewTokenStore(cfg *Config, tcfgs ...*TokenConfig)  *TokenStore {
 	session, err := mgo.Dial(cfg.URL)
 	if err != nil {
-		return nil, err
+		return nil
 	}
 
-	return NewTokenStoreWithSession(session, cfg.DB, tcfgs...), nil
+	return NewTokenStoreWithSession(session, cfg.DB, tcfgs...)
 }
 
 // NewTokenStoreWithSession create a token store instance based on mongodb
