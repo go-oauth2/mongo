@@ -3,8 +3,8 @@ package mongo
 import (
 	"testing"
 
+	"github.com/go-oauth2/oauth2/v4/models"
 	. "github.com/smartystreets/goconvey/convey"
-	"gopkg.in/oauth2.v3/models"
 )
 
 func TestClientStore(t *testing.T) {

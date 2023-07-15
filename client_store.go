@@ -1,9 +1,12 @@
 package mongo
 
 import (
+	"context"
+
 	"github.com/globalsign/mgo"
-	"gopkg.in/oauth2.v3"
-	"gopkg.in/oauth2.v3/models"
+
+	"github.com/go-oauth2/oauth2/v4"
+	"github.com/go-oauth2/oauth2/v4/models"
 )
 
 // ClientConfig client configuration parameters
@@ -67,7 +70,7 @@ func (cs *ClientStore) cHandler(name string, handler func(c *mgo.Collection)) {
 }
 
 // Set set client information
-func (cs *ClientStore) Set(info oauth2.ClientInfo) (err error) {
+func (cs *ClientStore) Create(info oauth2.ClientInfo) (err error) {
 	cs.cHandler(cs.ccfg.ClientsCName, func(c *mgo.Collection) {
 		entity := &client{
 			ID:     info.GetID(),
@@ -86,7 +89,7 @@ func (cs *ClientStore) Set(info oauth2.ClientInfo) (err error) {
 }
 
 // GetByID according to the ID for the client information
-func (cs *ClientStore) GetByID(id string) (info oauth2.ClientInfo, err error) {
+func (cs *ClientStore) GetByID(ctx context.Context, id string) (info oauth2.ClientInfo, err error) {
 	cs.cHandler(cs.ccfg.ClientsCName, func(c *mgo.Collection) {
 		entity := new(client)
 
