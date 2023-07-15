@@ -3,13 +3,17 @@ package mongo
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"time"
 
-	"github.com/globalsign/mgo"
-	"github.com/globalsign/mgo/bson"
-	"github.com/globalsign/mgo/txn"
+	// "github.com/globalsign/mgo"
+	// "github.com/globalsign/mgo/bson"
+	// "github.com/globalsign/mgo/txn"
 	"github.com/go-oauth2/oauth2/v4"
 	"github.com/go-oauth2/oauth2/v4/models"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // TokenConfig token configuration parameters
@@ -36,25 +40,39 @@ func NewDefaultTokenConfig() *TokenConfig {
 
 // NewTokenStore create a token store instance based on mongodb
 func NewTokenStore(cfg *Config, tcfgs ...*TokenConfig) (store *TokenStore) {
-	session, err := mgo.Dial(cfg.URL)
+	clientOptions := options.Client().ApplyURI(cfg.URL)
+	clientOptions.SetAuth(options.Credential{
+		Username: cfg.Username,
+		Password: cfg.Password,
+	})
+
+	c, err := mongo.Connect(context.TODO(), clientOptions)
 	if err != nil {
-		panic(err)
+		log.Fatal("ClientStore failed to connect mongo: ", err)
+	} else {
+		log.Println("Connection to mongoDB successful")
 	}
 
-	return NewTokenStoreWithSession(session, cfg.DB, tcfgs...)
+	// session, err := mgo.Dial(cfg.URL)
+	// if err != nil {
+	// 	panic(err)
+	// }
+
+	return NewTokenStoreWithSession(c, cfg.DB, tcfgs...)
 }
 
 // NewTokenStoreWithSession create a token store instance based on mongodb
-func NewTokenStoreWithSession(session *mgo.Session, dbName string, tcfgs ...*TokenConfig) (store *TokenStore) {
+func NewTokenStoreWithSession(client *mongo.Client, dbName string, tcfgs ...*TokenConfig) (store *TokenStore) {
 	ts := &TokenStore{
-		dbName:  dbName,
-		session: session,
-		tcfg:    NewDefaultTokenConfig(),
+		dbName: dbName,
+		client: client,
+		tcfg:   NewDefaultTokenConfig(),
 	}
 	if len(tcfgs) > 0 {
 		ts.tcfg = tcfgs[0]
 	}
 
+	// TODO see how to manage that.....
 	_ = ts.c(ts.tcfg.BasicCName).EnsureIndex(mgo.Index{
 		Key:         []string{"ExpiredAt"},
 		ExpireAfter: time.Second * 1,
@@ -76,26 +94,28 @@ func NewTokenStoreWithSession(session *mgo.Session, dbName string, tcfgs ...*Tok
 
 // TokenStore MongoDB storage for OAuth 2.0
 type TokenStore struct {
-	tcfg    *TokenConfig
-	dbName  string
-	session *mgo.Session
+	tcfg   *TokenConfig
+	dbName string
+	client *mongo.Client
 }
 
 // Close close the mongo session
 func (ts *TokenStore) Close() {
-	ts.session.Close()
+	if err := ts.client.Disconnect(context.Background()); err != nil {
+		log.Fatal(err)
+	}
 }
 
-func (ts *TokenStore) c(name string) *mgo.Collection {
-	return ts.session.DB(ts.dbName).C(name)
+func (ts *TokenStore) c(name string) *mongo.Collection {
+	return ts.client.Database(ts.dbName).Collection(name)
 }
 
-func (ts *TokenStore) cHandler(name string, handler func(c *mgo.Collection)) {
-	session := ts.session.Clone()
-	defer session.Close()
-	handler(session.DB(ts.dbName).C(name))
-	return
-}
+// func (ts *TokenStore) cHandler(name string, handler func(c *mgo.Collection)) {
+// 	session := ts.session.Clone()
+// 	defer session.Close()
+// 	handler(session.DB(ts.dbName).C(name))
+// 	return
+// }
 
 // Create create and store the new token information
 func (ts *TokenStore) Create(ctx context.Context, info oauth2.TokenInfo) (err error) {

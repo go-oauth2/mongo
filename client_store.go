@@ -2,11 +2,14 @@ package mongo
 
 import (
 	"context"
-
-	"github.com/globalsign/mgo"
+	"errors"
+	"log"
 
 	"github.com/go-oauth2/oauth2/v4"
 	"github.com/go-oauth2/oauth2/v4/models"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // ClientConfig client configuration parameters
@@ -24,20 +27,29 @@ func NewDefaultClientConfig() *ClientConfig {
 
 // NewClientStore create a client store instance based on mongodb
 func NewClientStore(cfg *Config, ccfgs ...*ClientConfig) *ClientStore {
-	session, err := mgo.Dial(cfg.URL)
+
+	clientOptions := options.Client().ApplyURI(cfg.URL)
+	clientOptions.SetAuth(options.Credential{
+		Username: cfg.Username,
+		Password: cfg.Password,
+	})
+
+	c, err := mongo.Connect(context.TODO(), clientOptions)
 	if err != nil {
-		panic(err)
+		log.Fatal("ClientStore failed to connect mongo: ", err)
+	} else {
+		log.Println("Connection to mongoDB successful")
 	}
 
-	return NewClientStoreWithSession(session, cfg.DB, ccfgs...)
+	return NewClientStoreWithSession(c, cfg.DB, ccfgs...)
 }
 
 // NewClientStoreWithSession create a client store instance based on mongodb
-func NewClientStoreWithSession(session *mgo.Session, dbName string, ccfgs ...*ClientConfig) *ClientStore {
+func NewClientStoreWithSession(client *mongo.Client, dbName string, ccfgs ...*ClientConfig) *ClientStore {
 	cs := &ClientStore{
-		dbName:  dbName,
-		session: session,
-		ccfg:    NewDefaultClientConfig(),
+		dbName: dbName,
+		client: client,
+		ccfg:   NewDefaultClientConfig(),
 	}
 	if len(ccfgs) > 0 {
 		cs.ccfg = ccfgs[0]
@@ -48,77 +60,73 @@ func NewClientStoreWithSession(session *mgo.Session, dbName string, ccfgs ...*Cl
 
 // ClientStore MongoDB storage for OAuth 2.0
 type ClientStore struct {
-	ccfg    *ClientConfig
-	dbName  string
-	session *mgo.Session
+	ccfg   *ClientConfig
+	dbName string
+	client *mongo.Client
 }
 
 // Close close the mongo session
 func (cs *ClientStore) Close() {
-	cs.session.Close()
+	if err := cs.client.Disconnect(context.Background()); err != nil {
+		log.Fatal(err)
+	}
 }
 
-func (cs *ClientStore) c(name string) *mgo.Collection {
-	return cs.session.DB(cs.dbName).C(name)
+func (cs *ClientStore) c(name string) *mongo.Collection {
+	return cs.client.Database(cs.dbName).Collection(name)
 }
 
-func (cs *ClientStore) cHandler(name string, handler func(c *mgo.Collection)) {
-	session := cs.session.Clone()
-	defer session.Close()
-	handler(session.DB(cs.dbName).C(name))
-	return
-}
-
-// Set set client information
+// Create create client information
 func (cs *ClientStore) Create(info oauth2.ClientInfo) (err error) {
-	cs.cHandler(cs.ccfg.ClientsCName, func(c *mgo.Collection) {
-		entity := &client{
-			ID:     info.GetID(),
-			Secret: info.GetSecret(),
-			Domain: info.GetDomain(),
-			UserID: info.GetUserID(),
-		}
+	entity := &client{
+		ID:     info.GetID(),
+		Secret: info.GetSecret(),
+		Domain: info.GetDomain(),
+		UserID: info.GetUserID(),
+	}
 
-		if cerr := c.Insert(entity); cerr != nil {
-			err = cerr
-			return
-		}
-	})
+	collection := cs.c(cs.ccfg.ClientsCName)
+
+	if _, err := collection.InsertOne(context.Background(), entity); err != nil {
+		log.Fatal(err)
+	}
 
 	return
 }
 
 // GetByID according to the ID for the client information
 func (cs *ClientStore) GetByID(ctx context.Context, id string) (info oauth2.ClientInfo, err error) {
-	cs.cHandler(cs.ccfg.ClientsCName, func(c *mgo.Collection) {
-		entity := new(client)
 
-		if cerr := c.FindId(id).One(entity); cerr != nil {
-			err = cerr
-			return
+	filter := bson.M{"_id": id}
+	result := cs.c(cs.ccfg.ClientsCName).FindOne(ctx, filter)
+	if err := result.Err(); err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, err
 		}
+		return nil, errors.New("Internal server error, no client found for this ID")
 
-		info = &models.Client{
-			ID:     entity.ID,
-			Secret: entity.Secret,
-			Domain: entity.Domain,
-			UserID: entity.UserID,
-		}
-	})
+	}
+
+	entity := &client{}
+	if err := result.Decode(entity); err != nil {
+		log.Println(err)
+	}
+
+	info = &models.Client{
+		ID:     entity.ID,
+		Secret: entity.Secret,
+		Domain: entity.Domain,
+		UserID: entity.UserID,
+	}
 
 	return
 }
 
 // RemoveByID use the client id to delete the client information
 func (cs *ClientStore) RemoveByID(id string) (err error) {
-	cs.cHandler(cs.ccfg.ClientsCName, func(c *mgo.Collection) {
-		if cerr := c.RemoveId(id); cerr != nil {
-			err = cerr
-			return
-		}
-	})
-
-	return
+	filter := bson.M{"_id": id}
+	_, err = cs.c(cs.ccfg.ClientsCName).DeleteOne(context.Background(), filter)
+	return err
 }
 
 type client struct {
