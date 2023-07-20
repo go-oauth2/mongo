@@ -2,18 +2,20 @@ package mongo
 
 // Config mongodb configuration parameters
 type Config struct {
-	URL      string
-	DB       string
-	Username string
-	Password string
+	URL          string
+	DB           string
+	Username     string
+	Password     string
+	IsReplicaSet bool
 }
 
 // NewConfig create mongodb configuration
-func NewConfig(url, db, username, password string) *Config {
+func NewConfig(url, db, username, password string, rpls bool) *Config {
 	return &Config{
-		URL:      url,
-		DB:       db,
-		Username: username,
-		Password: password,
+		URL:          url,
+		DB:           db,
+		Username:     username,
+		Password:     password,
+		IsReplicaSet: rpls,
 	}
 }

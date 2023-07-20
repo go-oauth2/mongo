@@ -3,17 +3,17 @@ package mongo
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"time"
 
-	// "github.com/globalsign/mgo"
-	// "github.com/globalsign/mgo/bson"
-	// "github.com/globalsign/mgo/txn"
 	"github.com/go-oauth2/oauth2/v4"
 	"github.com/go-oauth2/oauth2/v4/models"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/writeconcern"
 )
 
 // TokenConfig token configuration parameters
@@ -40,11 +40,18 @@ func NewDefaultTokenConfig() *TokenConfig {
 
 // NewTokenStore create a token store instance based on mongodb
 func NewTokenStore(cfg *Config, tcfgs ...*TokenConfig) (store *TokenStore) {
+	// clientOptions := options.Client().ApplyURI(cfg.URL).SetWriteConcern(writeconcern.New(writeconcern.WMajority()))
+
+	fmt.Println("See url: ", cfg.URL)
+
 	clientOptions := options.Client().ApplyURI(cfg.URL)
-	clientOptions.SetAuth(options.Credential{
-		Username: cfg.Username,
-		Password: cfg.Password,
-	})
+
+	if !cfg.IsReplicaSet {
+		clientOptions.SetAuth(options.Credential{
+			Username: cfg.Username,
+			Password: cfg.Password,
+		})
+	}
 
 	c, err := mongo.Connect(context.TODO(), clientOptions)
 	if err != nil {
@@ -53,40 +60,52 @@ func NewTokenStore(cfg *Config, tcfgs ...*TokenConfig) (store *TokenStore) {
 		log.Println("Connection to mongoDB successful")
 	}
 
-	// session, err := mgo.Dial(cfg.URL)
-	// if err != nil {
-	// 	panic(err)
-	// }
+	err = c.Ping(context.TODO(), nil)
+	if err != nil {
+		log.Fatal("MongoDB ping failed:", err)
+	}
 
-	return NewTokenStoreWithSession(c, cfg.DB, tcfgs...)
+	log.Println("Ping db successfull")
+
+	return NewTokenStoreWithSession(c, cfg, tcfgs...)
 }
 
 // NewTokenStoreWithSession create a token store instance based on mongodb
-func NewTokenStoreWithSession(client *mongo.Client, dbName string, tcfgs ...*TokenConfig) (store *TokenStore) {
+func NewTokenStoreWithSession(client *mongo.Client, cfg *Config, tcfgs ...*TokenConfig) (store *TokenStore) {
 	ts := &TokenStore{
-		dbName: dbName,
-		client: client,
-		tcfg:   NewDefaultTokenConfig(),
+		dbName:       cfg.DB,
+		client:       client,
+		tcfg:         NewDefaultTokenConfig(),
+		isReplicaSet: cfg.IsReplicaSet,
 	}
+
 	if len(tcfgs) > 0 {
 		ts.tcfg = tcfgs[0]
 	}
 
-	// TODO see how to manage that.....
-	_ = ts.c(ts.tcfg.BasicCName).EnsureIndex(mgo.Index{
-		Key:         []string{"ExpiredAt"},
-		ExpireAfter: time.Second * 1,
+	_, err := ts.client.Database(ts.dbName).Collection(ts.tcfg.BasicCName).Indexes().CreateOne(context.TODO(), mongo.IndexModel{
+		Keys:    bson.D{{"ExpiredAt", 1}},
+		Options: options.Index().SetExpireAfterSeconds(1),
 	})
+	if err != nil {
+		log.Fatalln("Error creating index: ", ts.tcfg.BasicCName, " - ", err)
+	}
 
-	_ = ts.c(ts.tcfg.AccessCName).EnsureIndex(mgo.Index{
-		Key:         []string{"ExpiredAt"},
-		ExpireAfter: time.Second * 1,
+	_, err = ts.client.Database(ts.dbName).Collection(ts.tcfg.AccessCName).Indexes().CreateOne(context.TODO(), mongo.IndexModel{
+		Keys:    bson.D{{"ExpiredAt", 1}},
+		Options: options.Index().SetExpireAfterSeconds(1),
 	})
+	if err != nil {
+		log.Fatalln("Error creating index: ", ts.tcfg.AccessCName, " - ", err)
+	}
 
-	_ = ts.c(ts.tcfg.RefreshCName).EnsureIndex(mgo.Index{
-		Key:         []string{"ExpiredAt"},
-		ExpireAfter: time.Second * 1,
+	_, err = ts.client.Database(ts.dbName).Collection(ts.tcfg.RefreshCName).Indexes().CreateOne(context.TODO(), mongo.IndexModel{
+		Keys:    bson.D{{"ExpiredAt", 1}},
+		Options: options.Index().SetExpireAfterSeconds(1),
 	})
+	if err != nil {
+		log.Fatalln("Error creating index: ", ts.tcfg.RefreshCName, " - ", err)
+	}
 
 	store = ts
 	return
@@ -94,9 +113,10 @@ func NewTokenStoreWithSession(client *mongo.Client, dbName string, tcfgs ...*Tok
 
 // TokenStore MongoDB storage for OAuth 2.0
 type TokenStore struct {
-	tcfg   *TokenConfig
-	dbName string
-	client *mongo.Client
+	tcfg         *TokenConfig
+	dbName       string
+	client       *mongo.Client
+	isReplicaSet bool
 }
 
 // Close close the mongo session
@@ -110,13 +130,6 @@ func (ts *TokenStore) c(name string) *mongo.Collection {
 	return ts.client.Database(ts.dbName).Collection(name)
 }
 
-// func (ts *TokenStore) cHandler(name string, handler func(c *mgo.Collection)) {
-// 	session := ts.session.Clone()
-// 	defer session.Close()
-// 	handler(session.DB(ts.dbName).C(name))
-// 	return
-// }
-
 // Create create and store the new token information
 func (ts *TokenStore) Create(ctx context.Context, info oauth2.TokenInfo) (err error) {
 	jv, err := json.Marshal(info)
@@ -124,14 +137,22 @@ func (ts *TokenStore) Create(ctx context.Context, info oauth2.TokenInfo) (err er
 		return
 	}
 
+	log.Println("In Create -------------------------------------------")
+
 	if code := info.GetCode(); code != "" {
-		ts.cHandler(ts.tcfg.BasicCName, func(c *mgo.Collection) {
-			err = c.Insert(basicData{
-				ID:        code,
-				Data:      jv,
-				ExpiredAt: info.GetCodeCreateAt().Add(info.GetCodeExpiresIn()),
-			})
-		})
+		log.Println("In Create in info.GetCode() ------------------------------------")
+		// Create the basicData document
+		basicData := basicData{
+			ID:        code,
+			Data:      jv,
+			ExpiredAt: info.GetCodeCreateAt().Add(info.GetCodeExpiresIn()),
+		}
+
+		_, err = ts.c(ts.tcfg.BasicCName).InsertOne(ctx, basicData)
+		if err != nil {
+			log.Println("Error CreateToken with code: ", err)
+		}
+
 		return
 	}
 
@@ -143,118 +164,160 @@ func (ts *TokenStore) Create(ctx context.Context, info oauth2.TokenInfo) (err er
 			aexp = rexp
 		}
 	}
-	id := bson.NewObjectId().Hex()
-	ops := []txn.Op{{
-		C:      ts.tcfg.BasicCName,
-		Id:     id,
-		Assert: txn.DocMissing,
-		Insert: basicData{
-			Data:      jv,
-			ExpiredAt: rexp,
-		},
-	}, {
-		C:      ts.tcfg.AccessCName,
-		Id:     info.GetAccess(),
-		Assert: txn.DocMissing,
-		Insert: tokenData{
-			BasicID:   id,
-			ExpiredAt: aexp,
-		},
-	}}
-	if refresh := info.GetRefresh(); refresh != "" {
-		ops = append(ops, txn.Op{
-			C:      ts.tcfg.RefreshCName,
-			Id:     refresh,
-			Assert: txn.DocMissing,
-			Insert: tokenData{
+	// id := bson.NewObjectId().Hex()
+	id := primitive.NewObjectID().Hex()
+
+	// Create the basicData document
+	basicData := basicData{
+		ID:        id,
+		Data:      jv,
+		ExpiredAt: rexp,
+	}
+
+	// Create the tokenData document for access
+	accessData := tokenData{
+		ID:        info.GetAccess(),
+		BasicID:   id,
+		ExpiredAt: aexp,
+	}
+
+	// MongoDB is deployed as a replicaSet
+	if ts.isReplicaSet {
+
+		// Create collections
+		wcMajority := writeconcern.New(writeconcern.WMajority(), writeconcern.WTimeout(2*time.Second))
+		wcMajorityCollectionOpts := options.Collection().SetWriteConcern(wcMajority)
+
+		basicColl := ts.client.Database(ts.dbName).Collection(ts.tcfg.BasicCName, wcMajorityCollectionOpts)
+		accessColl := ts.client.Database(ts.dbName).Collection(ts.tcfg.AccessCName, wcMajorityCollectionOpts)
+		refreshColl := ts.client.Database(ts.dbName).Collection(ts.tcfg.RefreshCName, wcMajorityCollectionOpts)
+
+		callback := func(sessCtx mongo.SessionContext) (interface{}, error) {
+			if _, err := basicColl.InsertOne(sessCtx, basicData); err != nil {
+				return nil, err
+			}
+			if _, err := accessColl.InsertOne(sessCtx, accessData); err != nil {
+				return nil, err
+			}
+
+			refresh := info.GetRefresh()
+			if refresh != "" {
+				refreshData := tokenData{
+					ID:        refresh,
+					BasicID:   id,
+					ExpiredAt: rexp,
+				}
+				if _, err := refreshColl.InsertOne(sessCtx, refreshData); err != nil {
+					return nil, err
+				}
+
+			}
+			return nil, nil
+		}
+
+		session, err := ts.client.StartSession()
+		if err != nil {
+			return err
+		}
+		defer session.EndSession(ctx)
+		result, err := session.WithTransaction(ctx, callback)
+		if err != nil {
+			return err
+		}
+		log.Printf("result: %v\n", result)
+
+	} else {
+		// MongoDB is deployed as a single instance
+
+		// TODO test without txn, so implement my own transaction
+		log.Println("insertToken basicData in BasicCName id: ", string(basicData.ID))
+		log.Println("insertToken basicData in BasicCName data: ", string(basicData.Data))
+		_, err = ts.c(ts.tcfg.BasicCName).InsertOne(context.TODO(), basicData)
+		if err != nil {
+			log.Println("Err insertToken into basicCname------------------------: ", err)
+		}
+
+		log.Println("insertToken accessData in AccessCName id: ", string(accessData.ID))
+		_, err = ts.c(ts.tcfg.AccessCName).InsertOne(context.TODO(), accessData)
+		if err != nil {
+			log.Println("Err insertToken into accessCname-----------------------: ", err)
+		}
+
+		// Add the refresh token operation if refresh is not empty
+		refresh := info.GetRefresh()
+		if refresh != "" {
+			refreshData := tokenData{
+				ID:        refresh,
 				BasicID:   id,
 				ExpiredAt: rexp,
-			},
-		})
+			}
+			log.Println("insertToken refreshData in RefreshCName: ", string(refreshData.ID))
+			_, err = ts.c(ts.tcfg.RefreshCName).InsertOne(context.TODO(), refreshData)
+			if err != nil {
+				log.Println("Err insertToken into refreshCname------------------------: ", err)
+			}
+		}
 	}
-	ts.cHandler(ts.tcfg.TxnCName, func(c *mgo.Collection) {
-		runner := txn.NewRunner(c)
-		err = runner.Run(ops, "", nil)
-	})
 	return
 }
 
 // RemoveByCode use the authorization code to delete the token information
 func (ts *TokenStore) RemoveByCode(ctx context.Context, code string) (err error) {
-	ts.cHandler(ts.tcfg.BasicCName, func(c *mgo.Collection) {
-		verr := c.RemoveId(code)
-		if verr != nil {
-			if verr == mgo.ErrNotFound {
-				return
-			}
-			err = verr
-		}
-	})
+	_, err = ts.c(ts.tcfg.BasicCName).DeleteOne(ctx, bson.D{{Key: "_id", Value: code}})
+	if err != nil {
+		log.Println("Error RemoveByCode: ", err)
+	}
 	return
 }
 
 // RemoveByAccess use the access token to delete the token information
 func (ts *TokenStore) RemoveByAccess(ctx context.Context, access string) (err error) {
-	ts.cHandler(ts.tcfg.AccessCName, func(c *mgo.Collection) {
-		verr := c.RemoveId(access)
-		if verr != nil {
-			if verr == mgo.ErrNotFound {
-				return
-			}
-			err = verr
-		}
-	})
+	_, err = ts.c(ts.tcfg.AccessCName).DeleteOne(ctx, bson.D{{Key: "_id", Value: access}})
+	if err != nil {
+		log.Println("Error RemoveByAccess: ", err)
+	}
 	return
 }
 
 // RemoveByRefresh use the refresh token to delete the token information
 func (ts *TokenStore) RemoveByRefresh(ctx context.Context, refresh string) (err error) {
-	ts.cHandler(ts.tcfg.RefreshCName, func(c *mgo.Collection) {
-		verr := c.RemoveId(refresh)
-		if verr != nil {
-			if verr == mgo.ErrNotFound {
-				return
-			}
-			err = verr
-		}
-	})
+	_, err = ts.c(ts.tcfg.RefreshCName).DeleteOne(ctx, bson.D{{Key: "_id", Value: refresh}})
+	if err != nil {
+		log.Println("Error RemoveByRefresh: ", err)
+	}
 	return
 }
 
 func (ts *TokenStore) getData(basicID string) (ti oauth2.TokenInfo, err error) {
-	ts.cHandler(ts.tcfg.BasicCName, func(c *mgo.Collection) {
-		var bd basicData
-		verr := c.FindId(basicID).One(&bd)
-		if verr != nil {
-			if verr == mgo.ErrNotFound {
-				return
-			}
-			err = verr
-			return
+
+	var bd basicData
+	err = ts.c(ts.tcfg.BasicCName).FindOne(context.TODO(), bson.D{{Key: "_id", Value: basicID}}).Decode(&bd)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			return nil, nil
 		}
-		var tm models.Token
-		err = json.Unmarshal(bd.Data, &tm)
-		if err != nil {
-			return
-		}
-		ti = &tm
-	})
+		return nil, err
+	}
+
+	var tm models.Token
+	err = json.Unmarshal(bd.Data, &tm)
+	if err != nil {
+		return
+	}
+	ti = &tm
 	return
 }
 
 func (ts *TokenStore) getBasicID(cname, token string) (basicID string, err error) {
-	ts.cHandler(cname, func(c *mgo.Collection) {
-		var td tokenData
-		verr := c.FindId(token).One(&td)
-		if verr != nil {
-			if verr == mgo.ErrNotFound {
-				return
-			}
-			err = verr
+	var td tokenData
+	err = ts.c(cname).FindOne(context.TODO(), bson.D{{Key: "_id", Value: token}}).Decode(&td)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
 			return
 		}
-		basicID = td.BasicID
-	})
+		return
+	}
+	basicID = td.BasicID
 	return
 }
 

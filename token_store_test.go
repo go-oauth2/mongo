@@ -1,6 +1,7 @@
 package mongo
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -11,7 +12,7 @@ import (
 
 func TestTokenStore(t *testing.T) {
 	Convey("Test mongodb token store", t, func() {
-		store := NewTokenStore(NewConfig(url, dbName))
+		store := NewTokenStore(NewConfig(url, dbName, username, password, isReplicaSet))
 
 		Convey("Test authorization code store", func() {
 			info := &models.Token{
@@ -23,17 +24,17 @@ func TestTokenStore(t *testing.T) {
 				CodeCreateAt:  time.Now(),
 				CodeExpiresIn: time.Second * 5,
 			}
-			err := store.Create(info)
+			err := store.Create(context.TODO(), info)
 			So(err, ShouldBeNil)
 
-			cinfo, err := store.GetByCode(info.Code)
+			cinfo, err := store.GetByCode(context.TODO(), info.Code)
 			So(err, ShouldBeNil)
 			So(cinfo.GetUserID(), ShouldEqual, info.UserID)
 
-			err = store.RemoveByCode(info.Code)
+			err = store.RemoveByCode(context.TODO(), info.Code)
 			So(err, ShouldBeNil)
 
-			cinfo, err = store.GetByCode(info.Code)
+			cinfo, err = store.GetByCode(context.TODO(), info.Code)
 			So(err, ShouldBeNil)
 			So(cinfo, ShouldBeNil)
 		})
@@ -48,17 +49,17 @@ func TestTokenStore(t *testing.T) {
 				AccessCreateAt:  time.Now(),
 				AccessExpiresIn: time.Second * 5,
 			}
-			err := store.Create(info)
+			err := store.Create(context.TODO(), info)
 			So(err, ShouldBeNil)
 
-			ainfo, err := store.GetByAccess(info.GetAccess())
+			ainfo, err := store.GetByAccess(context.TODO(), info.GetAccess())
 			So(err, ShouldBeNil)
 			So(ainfo.GetUserID(), ShouldEqual, info.GetUserID())
 
-			err = store.RemoveByAccess(info.GetAccess())
+			err = store.RemoveByAccess(context.TODO(), info.GetAccess())
 			So(err, ShouldBeNil)
 
-			ainfo, err = store.GetByAccess(info.GetAccess())
+			ainfo, err = store.GetByAccess(context.TODO(), info.GetAccess())
 			So(err, ShouldBeNil)
 			So(ainfo, ShouldBeNil)
 		})
@@ -76,17 +77,17 @@ func TestTokenStore(t *testing.T) {
 				RefreshCreateAt:  time.Now(),
 				RefreshExpiresIn: time.Second * 15,
 			}
-			err := store.Create(info)
+			err := store.Create(context.TODO(), info)
 			So(err, ShouldBeNil)
 
-			rinfo, err := store.GetByRefresh(info.GetRefresh())
+			rinfo, err := store.GetByRefresh(context.TODO(), info.GetRefresh())
 			So(err, ShouldBeNil)
 			So(rinfo.GetUserID(), ShouldEqual, info.GetUserID())
 
-			err = store.RemoveByRefresh(info.GetRefresh())
+			err = store.RemoveByRefresh(context.TODO(), info.GetRefresh())
 			So(err, ShouldBeNil)
 
-			rinfo, err = store.GetByRefresh(info.GetRefresh())
+			rinfo, err = store.GetByRefresh(context.TODO(), info.GetRefresh())
 			So(err, ShouldBeNil)
 			So(rinfo, ShouldBeNil)
 		})

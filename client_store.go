@@ -29,10 +29,13 @@ func NewDefaultClientConfig() *ClientConfig {
 func NewClientStore(cfg *Config, ccfgs ...*ClientConfig) *ClientStore {
 
 	clientOptions := options.Client().ApplyURI(cfg.URL)
-	clientOptions.SetAuth(options.Credential{
-		Username: cfg.Username,
-		Password: cfg.Password,
-	})
+
+	if !cfg.IsReplicaSet {
+		clientOptions.SetAuth(options.Credential{
+			Username: cfg.Username,
+			Password: cfg.Password,
+		})
+	}
 
 	c, err := mongo.Connect(context.TODO(), clientOptions)
 	if err != nil {
@@ -40,6 +43,13 @@ func NewClientStore(cfg *Config, ccfgs ...*ClientConfig) *ClientStore {
 	} else {
 		log.Println("Connection to mongoDB successful")
 	}
+
+	err = c.Ping(context.TODO(), nil)
+	if err != nil {
+		log.Fatal("MongoDB ping failed:", err)
+	}
+
+	log.Println("Ping db successfull")
 
 	return NewClientStoreWithSession(c, cfg.DB, ccfgs...)
 }
@@ -87,8 +97,16 @@ func (cs *ClientStore) Create(info oauth2.ClientInfo) (err error) {
 
 	collection := cs.c(cs.ccfg.ClientsCName)
 
-	if _, err := collection.InsertOne(context.Background(), entity); err != nil {
+	filter := bson.M{"_id": entity.ID}
+	existingCount, err := collection.CountDocuments(context.Background(), filter)
+	if err != nil {
 		log.Fatal(err)
+	}
+
+	if existingCount == 0 {
+		if _, err := collection.InsertOne(context.Background(), entity); err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	return
@@ -96,7 +114,6 @@ func (cs *ClientStore) Create(info oauth2.ClientInfo) (err error) {
 
 // GetByID according to the ID for the client information
 func (cs *ClientStore) GetByID(ctx context.Context, id string) (info oauth2.ClientInfo, err error) {
-
 	filter := bson.M{"_id": id}
 	result := cs.c(cs.ccfg.ClientsCName).FindOne(ctx, filter)
 	if err := result.Err(); err != nil {
