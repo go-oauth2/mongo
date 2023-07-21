@@ -60,7 +60,7 @@ func TestTokenStore(t *testing.T) {
 			So(err, ShouldBeNil)
 
 			ainfo, err = store.GetByAccess(context.TODO(), info.GetAccess())
-			So(err, ShouldBeNil)
+			So(err.Error(), ShouldEqual, "mongo: no documents in result")
 			So(ainfo, ShouldBeNil)
 		})
 
@@ -88,7 +88,7 @@ func TestTokenStore(t *testing.T) {
 			So(err, ShouldBeNil)
 
 			rinfo, err = store.GetByRefresh(context.TODO(), info.GetRefresh())
-			So(err, ShouldBeNil)
+			So(err.Error(), ShouldEqual, "mongo: no documents in result")
 			So(rinfo, ShouldBeNil)
 		})
 	})

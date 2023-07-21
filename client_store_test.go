@@ -53,7 +53,7 @@ func TestClientStore(t *testing.T) {
 		Convey("UnknownClient", func() {
 			_, err := store.GetByID(context.TODO(), "unknown_client")
 
-			So(err, ShouldNotBeNil)
+			So(err.Error(), ShouldEqual, "mongo: no documents in result")
 		})
 	})
 
