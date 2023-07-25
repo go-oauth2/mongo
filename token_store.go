@@ -39,7 +39,8 @@ func NewDefaultTokenConfig() *TokenConfig {
 }
 
 // NewTokenStore create a token store instance based on mongodb
-func NewTokenStore(cfg *Config, tcfgs ...*TokenConfig) (store *TokenStore) {
+// func NewTokenStore(cfg *Config, tcfgs ...*TokenConfig) (store *TokenStore) {
+func NewTokenStore(cfg *Config) (store *TokenStore) {
 	// clientOptions := options.Client().ApplyURI(cfg.URL).SetWriteConcern(writeconcern.New(writeconcern.WMajority()))
 
 	fmt.Println("See url: ", cfg.URL)
@@ -67,11 +68,13 @@ func NewTokenStore(cfg *Config, tcfgs ...*TokenConfig) (store *TokenStore) {
 
 	log.Println("Ping db successfull")
 
-	return NewTokenStoreWithSession(c, cfg, tcfgs...)
+	// return NewTokenStoreWithSession(c, cfg, tcfgs...)
+	return NewTokenStoreWithSession(c, cfg)
 }
 
 // NewTokenStoreWithSession create a token store instance based on mongodb
-func NewTokenStoreWithSession(client *mongo.Client, cfg *Config, tcfgs ...*TokenConfig) (store *TokenStore) {
+// func NewTokenStoreWithSession(client *mongo.Client, cfg *Config, tcfgs ...*TokenConfig) (store *TokenStore) {
+func NewTokenStoreWithSession(client *mongo.Client, cfg *Config) (store *TokenStore) {
 	ts := &TokenStore{
 		dbName:       cfg.DB,
 		client:       client,
@@ -79,9 +82,20 @@ func NewTokenStoreWithSession(client *mongo.Client, cfg *Config, tcfgs ...*Token
 		isReplicaSet: cfg.IsReplicaSet,
 	}
 
-	if len(tcfgs) > 0 {
-		ts.tcfg = tcfgs[0]
+	if !cfg.IsReplicaSet {
+		ts.txnHandler = NewTransactionHandler(client, cfg.DB, cfg.Service, ts.tcfg)
+
+		// in case transactions did fail, remove garbage records
+		err := ts.txnHandler.cleanupTransactionsData(context.TODO())
+		if err != nil {
+			// TODO what to do with that err ??
+			log.Println("Err cleanupTransactionsData failed: ", err)
+		}
 	}
+
+	// if len(tcfgs) > 0 {
+	// 	ts.tcfg = tcfgs[0]
+	// }
 
 	_, err := ts.client.Database(ts.dbName).Collection(ts.tcfg.BasicCName).Indexes().CreateOne(context.TODO(), mongo.IndexModel{
 		Keys:    bson.D{{"ExpiredAt", 1}},
@@ -117,6 +131,7 @@ type TokenStore struct {
 	dbName       string
 	client       *mongo.Client
 	isReplicaSet bool
+	txnHandler   *transactionHandler
 }
 
 // Close close the mongo session
@@ -137,10 +152,7 @@ func (ts *TokenStore) Create(ctx context.Context, info oauth2.TokenInfo) (err er
 		return
 	}
 
-	log.Println("In Create -------------------------------------------")
-
 	if code := info.GetCode(); code != "" {
-		log.Println("In Create in info.GetCode() ------------------------------------")
 		// Create the basicData document
 		basicData := basicData{
 			ID:        code,
@@ -166,6 +178,7 @@ func (ts *TokenStore) Create(ctx context.Context, info oauth2.TokenInfo) (err er
 	}
 	// id := bson.NewObjectId().Hex()
 	id := primitive.NewObjectID().Hex()
+	fmt.Println("the id: ", id)
 
 	// Create the basicData document
 	basicData := basicData{
@@ -228,35 +241,8 @@ func (ts *TokenStore) Create(ctx context.Context, info oauth2.TokenInfo) (err er
 
 	} else {
 		// MongoDB is deployed as a single instance
+		return ts.txnHandler.runTransactionCreate(ctx, info, basicData, accessData, id, rexp)
 
-		// TODO test without txn, so implement my own transaction
-		log.Println("insertToken basicData in BasicCName id: ", string(basicData.ID))
-		log.Println("insertToken basicData in BasicCName data: ", string(basicData.Data))
-		_, err = ts.c(ts.tcfg.BasicCName).InsertOne(context.TODO(), basicData)
-		if err != nil {
-			log.Println("Err insertToken into basicCname------------------------: ", err)
-		}
-
-		log.Println("insertToken accessData in AccessCName id: ", string(accessData.ID))
-		_, err = ts.c(ts.tcfg.AccessCName).InsertOne(context.TODO(), accessData)
-		if err != nil {
-			log.Println("Err insertToken into accessCname-----------------------: ", err)
-		}
-
-		// Add the refresh token operation if refresh is not empty
-		refresh := info.GetRefresh()
-		if refresh != "" {
-			refreshData := tokenData{
-				ID:        refresh,
-				BasicID:   id,
-				ExpiredAt: rexp,
-			}
-			log.Println("insertToken refreshData in RefreshCName: ", string(refreshData.ID))
-			_, err = ts.c(ts.tcfg.RefreshCName).InsertOne(context.TODO(), refreshData)
-			if err != nil {
-				log.Println("Err insertToken into refreshCname------------------------: ", err)
-			}
-		}
 	}
 	return
 }

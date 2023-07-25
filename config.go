@@ -6,16 +6,27 @@ type Config struct {
 	DB           string
 	Username     string
 	Password     string
+	Service      string
 	IsReplicaSet bool
 }
 
-// NewConfig create mongodb configuration
-func NewConfig(url, db, username, password string, rpls bool) *Config {
+// NewConfigNonReplicaSet create mongodb configuration for a non-replicaSet
+func NewConfigNonReplicaSet(url, db, username, password, service string) *Config {
 	return &Config{
 		URL:          url,
 		DB:           db,
 		Username:     username,
 		Password:     password,
-		IsReplicaSet: rpls,
+		Service:      service,
+		IsReplicaSet: false,
+	}
+}
+
+// NewConfigReplicaSet create mongodb configuration for a ReplicaSet
+func NewConfigReplicaSet(url, db string) *Config {
+	return &Config{
+		URL:          url,
+		DB:           db,
+		IsReplicaSet: true,
 	}
 }
