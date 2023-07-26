@@ -26,26 +26,36 @@ type TokenConfig struct {
 	AccessCName string
 	// store refresh token data collection name(The default is oauth2_refresh)
 	RefreshCName string
+	storeConfig  *StoreConfig
 }
 
 // NewDefaultTokenConfig create a default token configuration
-func NewDefaultTokenConfig() *TokenConfig {
+func NewDefaultTokenConfig(strConfig *StoreConfig) *TokenConfig {
 	return &TokenConfig{
 		TxnCName:     "oauth2_txn",
 		BasicCName:   "oauth2_basic",
 		AccessCName:  "oauth2_access",
 		RefreshCName: "oauth2_refresh",
+		storeConfig:  strConfig,
 	}
 }
 
 // NewTokenStore create a token store instance based on mongodb
 // func NewTokenStore(cfg *Config, tcfgs ...*TokenConfig) (store *TokenStore) {
-func NewTokenStore(cfg *Config) (store *TokenStore) {
+func NewTokenStore(cfg *Config, scfgs ...*StoreConfig) (store *TokenStore) {
 	// clientOptions := options.Client().ApplyURI(cfg.URL).SetWriteConcern(writeconcern.New(writeconcern.WMajority()))
 
 	fmt.Println("See url: ", cfg.URL)
 
 	clientOptions := options.Client().ApplyURI(cfg.URL)
+	ctx := context.TODO()
+
+	if len(scfgs) > 0 && scfgs[0].connectionTimeout > 0 {
+		newCtx, cancel := context.WithTimeout(context.Background(), time.Duration(scfgs[0].connectionTimeout)*time.Second)
+		ctx = newCtx
+		defer cancel()
+		clientOptions.SetConnectTimeout(time.Duration(scfgs[0].connectionTimeout) * time.Second)
+	}
 
 	if !cfg.IsReplicaSet {
 		clientOptions.SetAuth(options.Credential{
@@ -54,7 +64,7 @@ func NewTokenStore(cfg *Config) (store *TokenStore) {
 		})
 	}
 
-	c, err := mongo.Connect(context.TODO(), clientOptions)
+	c, err := mongo.Connect(ctx, clientOptions)
 	if err != nil {
 		log.Fatal("ClientStore failed to connect mongo: ", err)
 	} else {
@@ -68,36 +78,41 @@ func NewTokenStore(cfg *Config) (store *TokenStore) {
 
 	log.Println("Ping db successfull")
 
-	// return NewTokenStoreWithSession(c, cfg, tcfgs...)
-	return NewTokenStoreWithSession(c, cfg)
+	return NewTokenStoreWithSession(c, cfg, scfgs...)
 }
 
 // NewTokenStoreWithSession create a token store instance based on mongodb
-// func NewTokenStoreWithSession(client *mongo.Client, cfg *Config, tcfgs ...*TokenConfig) (store *TokenStore) {
-func NewTokenStoreWithSession(client *mongo.Client, cfg *Config) (store *TokenStore) {
+func NewTokenStoreWithSession(client *mongo.Client, cfg *Config, scfgs ...*StoreConfig) (store *TokenStore) {
+	// func NewTokenStoreWithSession(client *mongo.Client, cfg *Config) (store *TokenStore) {
+
+	strCfgs := NewDefaultStoreConfig(cfg.DB, cfg.Service, cfg.IsReplicaSet)
+
 	ts := &TokenStore{
-		dbName:       cfg.DB,
-		client:       client,
-		tcfg:         NewDefaultTokenConfig(),
-		isReplicaSet: cfg.IsReplicaSet,
+		client: client,
+		tcfg:   NewDefaultTokenConfig(strCfgs),
 	}
 
-	if !cfg.IsReplicaSet {
-		ts.txnHandler = NewTransactionHandler(client, cfg.DB, cfg.Service, ts.tcfg)
+	if len(scfgs) > 0 {
+		if scfgs[0].connectionTimeout > 0 {
+			ts.tcfg.storeConfig.connectionTimeout = scfgs[0].connectionTimeout
+		}
+		if scfgs[0].requestTimeout > 0 {
+			ts.tcfg.storeConfig.requestTimeout = scfgs[0].requestTimeout
+		}
+	}
+
+	if !ts.tcfg.storeConfig.isReplicaSet {
+		ts.txnHandler = NewTransactionHandler(client, ts.tcfg)
 
 		// in case transactions did fail, remove garbage records
-		err := ts.txnHandler.cleanupTransactionsData(context.TODO())
+		err := ts.txnHandler.cleanupTransactionsData(context.TODO(), cfg.Service)
 		if err != nil {
 			// TODO what to do with that err ??
 			log.Println("Err cleanupTransactionsData failed: ", err)
 		}
 	}
 
-	// if len(tcfgs) > 0 {
-	// 	ts.tcfg = tcfgs[0]
-	// }
-
-	_, err := ts.client.Database(ts.dbName).Collection(ts.tcfg.BasicCName).Indexes().CreateOne(context.TODO(), mongo.IndexModel{
+	_, err := ts.client.Database(ts.tcfg.storeConfig.db).Collection(ts.tcfg.BasicCName).Indexes().CreateOne(context.TODO(), mongo.IndexModel{
 		Keys:    bson.D{{"ExpiredAt", 1}},
 		Options: options.Index().SetExpireAfterSeconds(1),
 	})
@@ -105,7 +120,7 @@ func NewTokenStoreWithSession(client *mongo.Client, cfg *Config) (store *TokenSt
 		log.Fatalln("Error creating index: ", ts.tcfg.BasicCName, " - ", err)
 	}
 
-	_, err = ts.client.Database(ts.dbName).Collection(ts.tcfg.AccessCName).Indexes().CreateOne(context.TODO(), mongo.IndexModel{
+	_, err = ts.client.Database(ts.tcfg.storeConfig.db).Collection(ts.tcfg.AccessCName).Indexes().CreateOne(context.TODO(), mongo.IndexModel{
 		Keys:    bson.D{{"ExpiredAt", 1}},
 		Options: options.Index().SetExpireAfterSeconds(1),
 	})
@@ -113,7 +128,7 @@ func NewTokenStoreWithSession(client *mongo.Client, cfg *Config) (store *TokenSt
 		log.Fatalln("Error creating index: ", ts.tcfg.AccessCName, " - ", err)
 	}
 
-	_, err = ts.client.Database(ts.dbName).Collection(ts.tcfg.RefreshCName).Indexes().CreateOne(context.TODO(), mongo.IndexModel{
+	_, err = ts.client.Database(ts.tcfg.storeConfig.db).Collection(ts.tcfg.RefreshCName).Indexes().CreateOne(context.TODO(), mongo.IndexModel{
 		Keys:    bson.D{{"ExpiredAt", 1}},
 		Options: options.Index().SetExpireAfterSeconds(1),
 	})
@@ -127,11 +142,9 @@ func NewTokenStoreWithSession(client *mongo.Client, cfg *Config) (store *TokenSt
 
 // TokenStore MongoDB storage for OAuth 2.0
 type TokenStore struct {
-	tcfg         *TokenConfig
-	dbName       string
-	client       *mongo.Client
-	isReplicaSet bool
-	txnHandler   *transactionHandler
+	tcfg       *TokenConfig
+	client     *mongo.Client
+	txnHandler *transactionHandler
 }
 
 // Close close the mongo session
@@ -142,7 +155,7 @@ func (ts *TokenStore) Close() {
 }
 
 func (ts *TokenStore) c(name string) *mongo.Collection {
-	return ts.client.Database(ts.dbName).Collection(name)
+	return ts.client.Database(ts.tcfg.storeConfig.db).Collection(name)
 }
 
 // Create create and store the new token information
@@ -150,6 +163,12 @@ func (ts *TokenStore) Create(ctx context.Context, info oauth2.TokenInfo) (err er
 	jv, err := json.Marshal(info)
 	if err != nil {
 		return
+	}
+
+	ctxReq, cancel := ts.tcfg.storeConfig.setRequestContext()
+	defer cancel()
+	if ctxReq != nil {
+		ctx = ctxReq
 	}
 
 	if code := info.GetCode(); code != "" {
@@ -176,9 +195,9 @@ func (ts *TokenStore) Create(ctx context.Context, info oauth2.TokenInfo) (err er
 			aexp = rexp
 		}
 	}
-	// id := bson.NewObjectId().Hex()
+
 	id := primitive.NewObjectID().Hex()
-	fmt.Println("the id: ", id)
+	// fmt.Println("the id: ", id)
 
 	// Create the basicData document
 	basicData := basicData{
@@ -194,16 +213,23 @@ func (ts *TokenStore) Create(ctx context.Context, info oauth2.TokenInfo) (err er
 		ExpiredAt: aexp,
 	}
 
+	// if context is defined manually, increase it for the transaction
+	ctxTxn, cancel := ts.tcfg.storeConfig.setTransactionCreateContext()
+	defer cancel()
+	if ctxTxn != nil {
+		ctx = ctxReq
+	}
+
 	// MongoDB is deployed as a replicaSet
-	if ts.isReplicaSet {
+	if ts.tcfg.storeConfig.isReplicaSet {
 
 		// Create collections
 		wcMajority := writeconcern.New(writeconcern.WMajority(), writeconcern.WTimeout(2*time.Second))
 		wcMajorityCollectionOpts := options.Collection().SetWriteConcern(wcMajority)
 
-		basicColl := ts.client.Database(ts.dbName).Collection(ts.tcfg.BasicCName, wcMajorityCollectionOpts)
-		accessColl := ts.client.Database(ts.dbName).Collection(ts.tcfg.AccessCName, wcMajorityCollectionOpts)
-		refreshColl := ts.client.Database(ts.dbName).Collection(ts.tcfg.RefreshCName, wcMajorityCollectionOpts)
+		basicColl := ts.client.Database(ts.tcfg.storeConfig.db).Collection(ts.tcfg.BasicCName, wcMajorityCollectionOpts)
+		accessColl := ts.client.Database(ts.tcfg.storeConfig.db).Collection(ts.tcfg.AccessCName, wcMajorityCollectionOpts)
+		refreshColl := ts.client.Database(ts.tcfg.storeConfig.db).Collection(ts.tcfg.RefreshCName, wcMajorityCollectionOpts)
 
 		callback := func(sessCtx mongo.SessionContext) (interface{}, error) {
 			if _, err := basicColl.InsertOne(sessCtx, basicData); err != nil {

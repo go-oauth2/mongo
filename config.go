@@ -12,7 +12,7 @@ type Config struct {
 
 // NewConfigNonReplicaSet create mongodb configuration for a non-replicaSet
 func NewConfigNonReplicaSet(url, db, username, password, service string) *Config {
-	return &Config{
+	config := &Config{
 		URL:          url,
 		DB:           db,
 		Username:     username,
@@ -20,13 +20,15 @@ func NewConfigNonReplicaSet(url, db, username, password, service string) *Config
 		Service:      service,
 		IsReplicaSet: false,
 	}
+	return config
 }
 
 // NewConfigReplicaSet create mongodb configuration for a ReplicaSet
 func NewConfigReplicaSet(url, db string) *Config {
-	return &Config{
+	config := &Config{
 		URL:          url,
 		DB:           db,
 		IsReplicaSet: true,
 	}
+	return config
 }

@@ -24,24 +24,25 @@ type transactionData struct {
 }
 
 type transactionHandler struct {
-	client      *mongo.Client
-	tcfg        *TokenConfig
-	dbName      string
-	serviceName string
+	client *mongo.Client
+	tcfg   *TokenConfig
 }
 
-func NewTransactionHandler(client *mongo.Client, dbName, serviceName string, tcfg *TokenConfig) *transactionHandler {
+func NewTransactionHandler(client *mongo.Client, tcfg *TokenConfig) *transactionHandler {
 	return &transactionHandler{
-		client:      client,
-		tcfg:        tcfg,
-		dbName:      dbName,
-		serviceName: serviceName,
+		client: client,
+		tcfg:   tcfg,
 	}
 }
 
 func (th *transactionHandler) runTransactionCreate(ctx context.Context, info oauth2.TokenInfo, basicData basicData, accessData tokenData, id string, rexp time.Time) (err error) {
 
-	// TODO the overall transaction must have a TIMEOUT
+	ctxReq, cancel := th.tcfg.storeConfig.setRequestContext()
+	defer cancel()
+	if ctxReq != nil {
+		ctx = ctxReq
+	}
+
 	// create id transaction idTXN
 	txnID := primitive.NewObjectID().Hex()
 
@@ -50,7 +51,7 @@ func (th *transactionHandler) runTransactionCreate(ctx context.Context, info oau
 		ID:         basicData.ID,
 		TxnID:      txnID,
 		Collection: th.tcfg.BasicCName,
-		Service:    th.serviceName,
+		Service:    th.tcfg.storeConfig.service,
 		CreatedAt:  time.Now(),
 	}
 	err = th.insertBasicTransactionData(ctx, basicTxnData)
@@ -75,7 +76,7 @@ func (th *transactionHandler) runTransactionCreate(ctx context.Context, info oau
 		ID:         info.GetAccess(),
 		TxnID:      txnID,
 		Collection: th.tcfg.AccessCName,
-		Service:    th.serviceName,
+		Service:    th.tcfg.storeConfig.service,
 		CreatedAt:  time.Now(),
 	}
 	err = th.insertTokenTransactionData(ctx, acccessTxnData)
@@ -173,7 +174,7 @@ func (th *transactionHandler) runTransactionCreate(ctx context.Context, info oau
 }
 
 func (th *transactionHandler) getCollection(collName string) *mongo.Collection {
-	return th.client.Database(th.dbName).Collection(collName)
+	return th.client.Database(th.tcfg.storeConfig.db).Collection(collName)
 }
 
 func (th *transactionHandler) insertBasicData(ctx context.Context, basicData basicData) error {
@@ -247,8 +248,8 @@ func (th *transactionHandler) removeTransactionData(ctx context.Context, tokenDa
 	return err
 }
 
-func (th *transactionHandler) cleanupTransactionsData(ctx context.Context) (err error) {
-	filter := bson.M{}
+func (th *transactionHandler) cleanupTransactionsData(ctx context.Context, service string) (err error) {
+	filter := bson.M{"Service": service}
 	cursor, err := th.getCollection(th.tcfg.TxnCName).Find(ctx, filter)
 	if err != nil {
 		log.Println("Err cleanupTransactionsData findAll TxnCName: ", err)

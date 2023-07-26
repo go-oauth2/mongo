@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"time"
 
 	"github.com/go-oauth2/oauth2/v4"
 	"github.com/go-oauth2/oauth2/v4/models"
@@ -12,23 +13,79 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+// StoreConfig hold configs common to all Configs(ClientConfig, TokenConfig)
+type StoreConfig struct {
+	db                string
+	service           string
+	connectionTimeout int
+	requestTimeout    int
+	isReplicaSet      bool
+}
+
+func NewStoreConfig(ctout, rtout int) *StoreConfig {
+	return &StoreConfig{
+		connectionTimeout: ctout,
+		requestTimeout:    rtout,
+	}
+}
+
+func NewDefaultStoreConfig(db, service string, isReplicasSet bool) *StoreConfig {
+	return &StoreConfig{
+		db:                db,
+		service:           service,
+		connectionTimeout: 0,
+		requestTimeout:    0,
+		isReplicaSet:      isReplicasSet,
+	}
+}
+
+func (sc *StoreConfig) setRequestContext() (context.Context, context.CancelFunc) {
+	ctx := context.Background()
+	if sc.requestTimeout > 0 {
+		log.Println("Request timeout: ", sc.requestTimeout)
+		timeout := time.Duration(sc.requestTimeout) * time.Second
+		return context.WithTimeout(ctx, timeout)
+	}
+	return nil, func() {}
+}
+
+func (sc *StoreConfig) setTransactionCreateContext() (context.Context, context.CancelFunc) {
+	ctx := context.Background()
+	if sc.requestTimeout > 0 {
+		// at max TransactionCreate run 7 requests
+		timeout := time.Duration(sc.requestTimeout*7) * time.Second
+		return context.WithTimeout(ctx, timeout)
+	}
+	return nil, func() {}
+}
+
 // ClientConfig client configuration parameters
 type ClientConfig struct {
 	// store clients data collection name(The default is oauth2_clients)
 	ClientsCName string
+	storeConfig  *StoreConfig
 }
 
 // NewDefaultClientConfig create a default client configuration
-func NewDefaultClientConfig() *ClientConfig {
+func NewDefaultClientConfig(strCfgs *StoreConfig) *ClientConfig {
 	return &ClientConfig{
 		ClientsCName: "oauth2_clients",
+		storeConfig:  strCfgs,
 	}
 }
 
 // NewClientStore create a client store instance based on mongodb
-func NewClientStore(cfg *Config, ccfgs ...*ClientConfig) *ClientStore {
+func NewClientStore(cfg *Config, scfgs ...*StoreConfig) *ClientStore {
 
 	clientOptions := options.Client().ApplyURI(cfg.URL)
+	ctx := context.TODO()
+
+	if len(scfgs) > 0 && scfgs[0].connectionTimeout > 0 {
+		newCtx, cancel := context.WithTimeout(context.Background(), time.Duration(scfgs[0].connectionTimeout)*time.Second)
+		ctx = newCtx
+		defer cancel()
+		clientOptions.SetConnectTimeout(time.Duration(scfgs[0].connectionTimeout) * time.Second)
+	}
 
 	if !cfg.IsReplicaSet {
 		clientOptions.SetAuth(options.Credential{
@@ -37,7 +94,7 @@ func NewClientStore(cfg *Config, ccfgs ...*ClientConfig) *ClientStore {
 		})
 	}
 
-	c, err := mongo.Connect(context.TODO(), clientOptions)
+	c, err := mongo.Connect(ctx, clientOptions)
 	if err != nil {
 		log.Fatal("ClientStore failed to connect mongo: ", err)
 	} else {
@@ -51,18 +108,25 @@ func NewClientStore(cfg *Config, ccfgs ...*ClientConfig) *ClientStore {
 
 	log.Println("Ping db successfull")
 
-	return NewClientStoreWithSession(c, cfg.DB, ccfgs...)
+	return NewClientStoreWithSession(c, cfg, scfgs...)
 }
 
 // NewClientStoreWithSession create a client store instance based on mongodb
-func NewClientStoreWithSession(client *mongo.Client, dbName string, ccfgs ...*ClientConfig) *ClientStore {
+func NewClientStoreWithSession(client *mongo.Client, cfg *Config, scfgs ...*StoreConfig) *ClientStore {
+	strCfgs := NewDefaultStoreConfig(cfg.DB, cfg.Service, cfg.IsReplicaSet)
+
 	cs := &ClientStore{
-		dbName: dbName,
 		client: client,
-		ccfg:   NewDefaultClientConfig(),
+		ccfg:   NewDefaultClientConfig(strCfgs),
 	}
-	if len(ccfgs) > 0 {
-		cs.ccfg = ccfgs[0]
+
+	if len(scfgs) > 0 {
+		if scfgs[0].connectionTimeout > 0 {
+			cs.ccfg.storeConfig.connectionTimeout = scfgs[0].connectionTimeout
+		}
+		if scfgs[0].requestTimeout > 0 {
+			cs.ccfg.storeConfig.requestTimeout = scfgs[0].requestTimeout
+		}
 	}
 
 	return cs
@@ -71,7 +135,6 @@ func NewClientStoreWithSession(client *mongo.Client, dbName string, ccfgs ...*Cl
 // ClientStore MongoDB storage for OAuth 2.0
 type ClientStore struct {
 	ccfg   *ClientConfig
-	dbName string
 	client *mongo.Client
 }
 
@@ -83,11 +146,19 @@ func (cs *ClientStore) Close() {
 }
 
 func (cs *ClientStore) c(name string) *mongo.Collection {
-	return cs.client.Database(cs.dbName).Collection(name)
+	return cs.client.Database(cs.ccfg.storeConfig.db).Collection(name)
 }
 
 // Create create client information
 func (cs *ClientStore) Create(info oauth2.ClientInfo) (err error) {
+	ctx := context.Background()
+
+	ctxReq, cancel := cs.ccfg.storeConfig.setRequestContext()
+	defer cancel()
+	if ctxReq != nil {
+		ctx = ctxReq
+	}
+
 	entity := &client{
 		ID:     info.GetID(),
 		Secret: info.GetSecret(),
@@ -98,13 +169,13 @@ func (cs *ClientStore) Create(info oauth2.ClientInfo) (err error) {
 	collection := cs.c(cs.ccfg.ClientsCName)
 
 	filter := bson.M{"_id": entity.ID}
-	existingCount, err := collection.CountDocuments(context.Background(), filter)
+	existingCount, err := collection.CountDocuments(ctx, filter)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	if existingCount == 0 {
-		if _, err := collection.InsertOne(context.Background(), entity); err != nil {
+		if _, err := collection.InsertOne(ctx, entity); err != nil {
 			log.Fatal(err)
 		}
 	}
@@ -114,6 +185,12 @@ func (cs *ClientStore) Create(info oauth2.ClientInfo) (err error) {
 
 // GetByID according to the ID for the client information
 func (cs *ClientStore) GetByID(ctx context.Context, id string) (info oauth2.ClientInfo, err error) {
+	ctxReq, cancel := cs.ccfg.storeConfig.setRequestContext()
+	defer cancel()
+	if ctxReq != nil {
+		ctx = ctxReq
+	}
+
 	filter := bson.M{"_id": id}
 	result := cs.c(cs.ccfg.ClientsCName).FindOne(ctx, filter)
 	if err := result.Err(); err != nil {
@@ -141,8 +218,16 @@ func (cs *ClientStore) GetByID(ctx context.Context, id string) (info oauth2.Clie
 
 // RemoveByID use the client id to delete the client information
 func (cs *ClientStore) RemoveByID(id string) (err error) {
+	ctx := context.Background()
+
+	ctxReq, cancel := cs.ccfg.storeConfig.setRequestContext()
+	defer cancel()
+	if ctxReq != nil {
+		ctx = ctxReq
+	}
+
 	filter := bson.M{"_id": id}
-	_, err = cs.c(cs.ccfg.ClientsCName).DeleteOne(context.Background(), filter)
+	_, err = cs.c(cs.ccfg.ClientsCName).DeleteOne(ctx, filter)
 	return err
 }
 
