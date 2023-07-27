@@ -7,4 +7,5 @@ const (
 	username     = "admin"
 	password     = "password"
 	isReplicaSet = false
+	service      = "myService"
 )

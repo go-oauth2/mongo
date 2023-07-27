@@ -49,12 +49,20 @@ func NewTokenStore(cfg *Config, scfgs ...*StoreConfig) (store *TokenStore) {
 
 	clientOptions := options.Client().ApplyURI(cfg.URL)
 	ctx := context.TODO()
+	ctxPing := context.TODO()
 
 	if len(scfgs) > 0 && scfgs[0].connectionTimeout > 0 {
 		newCtx, cancel := context.WithTimeout(context.Background(), time.Duration(scfgs[0].connectionTimeout)*time.Second)
 		ctx = newCtx
 		defer cancel()
 		clientOptions.SetConnectTimeout(time.Duration(scfgs[0].connectionTimeout) * time.Second)
+	}
+
+	if len(scfgs) > 0 && scfgs[0].requestTimeout > 0 {
+		newCtx, cancel := context.WithTimeout(context.Background(), time.Duration(scfgs[0].requestTimeout)*time.Second)
+		ctxPing = newCtx
+		defer cancel()
+		clientOptions.SetConnectTimeout(time.Duration(scfgs[0].requestTimeout) * time.Second)
 	}
 
 	if !cfg.IsReplicaSet {
@@ -71,7 +79,7 @@ func NewTokenStore(cfg *Config, scfgs ...*StoreConfig) (store *TokenStore) {
 		log.Println("Connection to mongoDB successful")
 	}
 
-	err = c.Ping(context.TODO(), nil)
+	err = c.Ping(ctxPing, nil)
 	if err != nil {
 		log.Fatal("MongoDB ping failed:", err)
 	}
@@ -105,7 +113,7 @@ func NewTokenStoreWithSession(client *mongo.Client, cfg *Config, scfgs ...*Store
 		ts.txnHandler = NewTransactionHandler(client, ts.tcfg)
 
 		// in case transactions did fail, remove garbage records
-		err := ts.txnHandler.cleanupTransactionsData(context.TODO(), cfg.Service)
+		err := ts.txnHandler.tw.cleanupTransactionsData(context.TODO(), cfg.Service)
 		if err != nil {
 			// TODO what to do with that err ??
 			log.Println("Err cleanupTransactionsData failed: ", err)

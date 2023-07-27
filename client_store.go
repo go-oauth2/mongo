@@ -13,6 +13,12 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+// TODO
+// add retry mecanism on all requests
+// if retry fail ping the db
+// if ping fail crash the service
+// that should be optional as a service's restart mecanism should be implemented
+
 // StoreConfig hold configs common to all Configs(ClientConfig, TokenConfig)
 type StoreConfig struct {
 	db                string
@@ -79,12 +85,20 @@ func NewClientStore(cfg *Config, scfgs ...*StoreConfig) *ClientStore {
 
 	clientOptions := options.Client().ApplyURI(cfg.URL)
 	ctx := context.TODO()
+	ctxPing := context.TODO()
 
 	if len(scfgs) > 0 && scfgs[0].connectionTimeout > 0 {
 		newCtx, cancel := context.WithTimeout(context.Background(), time.Duration(scfgs[0].connectionTimeout)*time.Second)
 		ctx = newCtx
 		defer cancel()
 		clientOptions.SetConnectTimeout(time.Duration(scfgs[0].connectionTimeout) * time.Second)
+	}
+
+	if len(scfgs) > 0 && scfgs[0].requestTimeout > 0 {
+		newCtx, cancel := context.WithTimeout(context.Background(), time.Duration(scfgs[0].requestTimeout)*time.Second)
+		ctxPing = newCtx
+		defer cancel()
+		clientOptions.SetConnectTimeout(time.Duration(scfgs[0].requestTimeout) * time.Second)
 	}
 
 	if !cfg.IsReplicaSet {
@@ -101,7 +115,7 @@ func NewClientStore(cfg *Config, scfgs ...*StoreConfig) *ClientStore {
 		log.Println("Connection to mongoDB successful")
 	}
 
-	err = c.Ping(context.TODO(), nil)
+	err = c.Ping(ctxPing, nil)
 	if err != nil {
 		log.Fatal("MongoDB ping failed:", err)
 	}
@@ -168,15 +182,12 @@ func (cs *ClientStore) Create(info oauth2.ClientInfo) (err error) {
 
 	collection := cs.c(cs.ccfg.ClientsCName)
 
-	filter := bson.M{"_id": entity.ID}
-	existingCount, err := collection.CountDocuments(ctx, filter)
+	_, err = collection.InsertOne(ctx, entity)
 	if err != nil {
-		log.Fatal(err)
-	}
-
-	if existingCount == 0 {
-		if _, err := collection.InsertOne(ctx, entity); err != nil {
+		if !mongo.IsDuplicateKeyError(err) {
 			log.Fatal(err)
+		} else {
+			return nil
 		}
 	}
 
