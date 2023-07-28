@@ -36,7 +36,7 @@ func NewTransactionHandler(client *mongo.Client, tcfg *TokenConfig) *transaction
 	}
 }
 
-func (th *transactionHandler) runTransactionCreate(ctx context.Context, info oauth2.TokenInfo, basicData basicData, accessData tokenData, id string, rexp time.Time) (err error) {
+func (th *transactionHandler) runTransactionCreate(ctx context.Context, info oauth2.TokenInfo, basicData basicData, accessData tokenData, id string, rexp time.Time) (errRET error) {
 
 	ctxReq, cancel := th.tcfg.storeConfig.setRequestContext()
 	defer cancel()
@@ -55,14 +55,17 @@ func (th *transactionHandler) runTransactionCreate(ctx context.Context, info oau
 		Service:    th.tcfg.storeConfig.service,
 		CreatedAt:  time.Now(),
 	}
-	err = th.tw.insertBasicTransactionData(ctx, basicTxnData)
-	if err != nil {
-		log.Println("T1: Failed add basicData to TxnCName: ", err)
+
+	var err error
+
+	errRET = th.tw.insertBasicTransactionData(ctx, basicTxnData)
+	if errRET != nil {
+		log.Println("T1: Failed add basicData to TxnCName: ", errRET)
 		return
 	} else {
-		err = th.tw.insertBasicData(ctx, basicData)
-		if err != nil {
-			log.Println("T1: Failed add basicData to BasicCName: ", err)
+		errRET = th.tw.insertBasicData(ctx, basicData)
+		if errRET != nil {
+			log.Println("T1: Failed add basicData to BasicCName: ", errRET)
 			err = th.tw.removeTransactionData(ctx, basicData.ID)
 			if err != nil {
 				// basicTxnData from will be remove when service restart
@@ -80,9 +83,9 @@ func (th *transactionHandler) runTransactionCreate(ctx context.Context, info oau
 		Service:    th.tcfg.storeConfig.service,
 		CreatedAt:  time.Now(),
 	}
-	err = th.tw.insertTokenTransactionData(ctx, acccessTxnData)
-	if err != nil {
-		log.Println("T2: Failed insert accessData to TxnCName: ", err)
+	errRET = th.tw.insertTokenTransactionData(ctx, acccessTxnData)
+	if errRET != nil {
+		log.Println("T2: Failed insert accessData to TxnCName: ", errRET)
 		err = th.tw.removeBasicData(ctx, basicData.ID)
 		if err != nil {
 			// basicData will be remove when service restart
@@ -96,9 +99,9 @@ func (th *transactionHandler) runTransactionCreate(ctx context.Context, info oau
 		}
 		return
 	} else {
-		err = th.tw.insertTokenData(ctx, accessData, th.tcfg.AccessCName)
-		if err != nil {
-			log.Println("T2: Failed insert accessData to AccessCName: ", err)
+		errRET = th.tw.insertTokenData(ctx, accessData, th.tcfg.AccessCName)
+		if errRET != nil {
+			log.Println("T2: Failed insert accessData to AccessCName: ", errRET)
 			err = th.tw.removeBasicData(ctx, basicData.ID)
 			if err != nil {
 				// basicData from will be remove when service restart
@@ -126,8 +129,8 @@ func (th *transactionHandler) runTransactionCreate(ctx context.Context, info oau
 			BasicID:   id,
 			ExpiredAt: rexp,
 		}
-		err = th.tw.insertTokenData(ctx, refreshData, th.tcfg.RefreshCName)
-		if err != nil {
+		errRET = th.tw.insertTokenData(ctx, refreshData, th.tcfg.RefreshCName)
+		if errRET != nil {
 			err = th.tw.removeBasicData(ctx, basicData.ID)
 			if err != nil {
 				// basicData will be remove when service restart
@@ -203,7 +206,6 @@ func (tw *transactionWorker) getCollection(collName string) *mongo.Collection {
 }
 
 func (tw *transactionWorker) insertBasicData(ctx context.Context, basicData basicData) error {
-	log.Println("insertBasicData in BasicCName id: ", basicData.ID)
 	_, err := tw.getCollection(tw.tc.BasicCName).InsertOne(ctx, basicData)
 	if err != nil {
 		if !mongo.IsDuplicateKeyError(err) {
@@ -219,7 +221,6 @@ func (tw *transactionWorker) insertBasicData(ctx context.Context, basicData basi
 }
 
 func (tw *transactionWorker) removeBasicData(ctx context.Context, basicDataID string) error {
-	log.Println("removeBasicData from BasicCName id: ", basicDataID)
 	_, err := tw.getCollection(tw.tc.BasicCName).DeleteOne(ctx, bson.D{{Key: "_id", Value: basicDataID}})
 	if err != nil {
 		log.Println("Err removeBasicData from BasicCname: ", err)
@@ -229,7 +230,6 @@ func (tw *transactionWorker) removeBasicData(ctx context.Context, basicDataID st
 }
 
 func (tw *transactionWorker) insertBasicTransactionData(ctx context.Context, txnData transactionData) error {
-	log.Println("insertBasicTransactionData in TxnCName id: ", txnData.ID)
 	_, err := tw.getCollection(tw.tc.TxnCName).InsertOne(ctx, txnData)
 	if err != nil {
 		if !mongo.IsDuplicateKeyError(err) {
@@ -244,7 +244,6 @@ func (tw *transactionWorker) insertBasicTransactionData(ctx context.Context, txn
 
 // InsertTokenData insert accessData and refreshData
 func (tw *transactionWorker) insertTokenData(ctx context.Context, tokenData tokenData, collectionName string) error {
-	log.Printf("insertTokenData in %v id: %v", collectionName, tokenData.ID)
 	_, err := tw.getCollection(collectionName).InsertOne(ctx, tokenData)
 	if err != nil {
 		if !mongo.IsDuplicateKeyError(err) {
@@ -258,7 +257,6 @@ func (tw *transactionWorker) insertTokenData(ctx context.Context, tokenData toke
 }
 
 func (tw *transactionWorker) removeTokenData(ctx context.Context, tokenDataID, collectionName string) error {
-	log.Printf("removeTokenData from %v id: %v", collectionName, tokenDataID)
 	_, err := tw.getCollection(collectionName).DeleteOne(ctx, bson.D{{Key: "_id", Value: tokenDataID}})
 	if err != nil {
 		log.Printf("Err removeTransactionData from %v: %v", collectionName, err)
@@ -269,7 +267,6 @@ func (tw *transactionWorker) removeTokenData(ctx context.Context, tokenDataID, c
 
 // InsertTokenData insert accessData and refreshData
 func (tw *transactionWorker) insertTokenTransactionData(ctx context.Context, txnData transactionData) error {
-	log.Println("insertTokenTransactionData in TxnCName id: ", txnData.ID)
 	_, err := tw.getCollection(tw.tc.TxnCName).InsertOne(ctx, txnData)
 	if err != nil {
 		if !mongo.IsDuplicateKeyError(err) {
@@ -283,7 +280,6 @@ func (tw *transactionWorker) insertTokenTransactionData(ctx context.Context, txn
 }
 
 func (tw *transactionWorker) removeTransactionData(ctx context.Context, tokenDataID string) error {
-	log.Println("removeTransactionData from TxnCName id: ", tokenDataID)
 	_, err := tw.getCollection(tw.tc.TxnCName).DeleteOne(ctx, bson.D{{Key: "_id", Value: tokenDataID}})
 	if err != nil {
 		log.Println("Err removeTransactionData from TxnCName: ", err)
