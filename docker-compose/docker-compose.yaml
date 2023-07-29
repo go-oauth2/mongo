@@ -1,0 +1,93 @@
+version: '3'
+
+services:
+  mongo:
+    image: 'mongo:4.2.16-bionic'
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: oauth2
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password
+    volumes:
+      - ./db-oauth/mongo-single/:/data/db
+
+#version: '3.9'
+#
+## if mongo V4, at the first deploy, log into a node and run manually run this
+## rs.initiate( {
+## _id : "myReplicaSet",
+## members: [
+##   { _id: 0, host: "mongo1:27017", priority: 2 },
+##   { _id: 1, host: "mongo2:27017", priority: 1 },
+##   { _id: 2, host: "mongo3:27017", priority: 1 }
+## ]
+## })
+#
+## for linux, in /etc/hosts add 127.0.0.1 localhost mongo1 mongo2 mongo3 
+#
+## optional: for 2 secondary nodes
+## run this in case you log into a secondary node and want to access the collections
+## rs.secondaryOk()  
+#
+#services:
+#  mongo1:
+#    image: mongo:4.2
+#      # image: mongo:5
+#    hostname: mongo1
+#    ports:
+#      - "27017:27017"
+#    environment:
+#      MONGO_INITDB_DATABASE: oauth2
+#        # MONGO_INITDB_ROOT_USERNAME: admin
+#        # MONGO_INITDB_ROOT_PASSWORD: password
+#    volumes:
+#      - ./db-oauth/mongo1/:/data/db
+#    healthcheck:
+#      test: echo 'db.runCommand("ping").ok' | mongo localhost:27017/admin --quiet
+#      interval: 2s
+#      timeout: 3s
+#      retries: 5
+#    entrypoint: [ "/usr/bin/mongod", "--bind_ip_all", "--replSet", "myReplicaSet" ]
+#
+#  mongo2:
+#    image: mongo:4.2
+#      # image: mongo:5
+#    hostname: mongo2
+#    ports:
+#      - "28017:27017"
+#    environment:
+#      MONGO_INITDB_DATABASE: oauth2
+#    volumes:
+#      - ./db-oauth/mongo2/:/data/db
+#    healthcheck:
+#      test: echo 'db.runCommand("ping").ok' | mongo localhost:27017/admin --quiet
+#      interval: 2s
+#      timeout: 3s
+#      retries: 5 
+#    entrypoint: [ "/usr/bin/mongod", "--bind_ip_all", "--replSet", "myReplicaSet" ]
+#
+#  mongo3:
+#    image: mongo:4.2
+#      # image: mongo:5
+#    hostname: mongo3
+#    ports:
+#      - "29017:27017"
+#    environment:
+#      MONGO_INITDB_DATABASE: oauth2
+#    depends_on:
+#      mongo1:
+#        condition: service_healthy
+#      mongo2:
+#        condition: service_healthy
+#    volumes:
+#      - ./db-oauth/mongo3/:/data/db
+#      - ./scripts/init.js:/scripts/init.js
+#    entrypoint:
+#      - bash
+#      - "-c"
+#      - |
+#        /usr/bin/mongod --bind_ip_all --replSet myReplicaSet && 
+#        sleep 5 &&
+#        mongo --host mongo1:27017 /scripts/init.js
+

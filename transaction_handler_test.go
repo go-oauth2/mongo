@@ -44,12 +44,11 @@ func TestTransaction(t *testing.T) {
 
 	storeConfig := NewStoreConfig(1, 5)
 
-	var store *TokenStore
-	if !isReplicaSet {
-		store = NewTokenStore(NewConfigNonReplicaSet(url, dbName, username, password, service), storeConfig)
-	} else {
+	if isReplicaSet {
 		t.Skip("Skipping the test as it is a replica set.")
 	}
+
+	store := NewTokenStore(NewConfigNonReplicaSet(url, dbName, username, password, service), storeConfig)
 
 	store.txnHandler.tw = &mockTransactionWorker{}
 
