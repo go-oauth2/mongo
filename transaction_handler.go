@@ -10,11 +10,7 @@ import (
 	"time"
 )
 
-type tokenInfo struct {
-	tokenID    string // tokenID
-	collection string
-}
-
+// transactionData is the object saved in the TxnCName db
 type transactionData struct {
 	ID         string    `bson:"_id"`
 	TxnID      string    `bson:"TxnID"`
@@ -36,6 +32,7 @@ func NewTransactionHandler(client *mongo.Client, tcfg *TokenConfig) *transaction
 	}
 }
 
+// runTransactionCreate run the transaction
 func (th *transactionHandler) runTransactionCreate(ctx context.Context, info oauth2.TokenInfo, basicData basicData, accessData tokenData, id string, rexp time.Time) (errRET error) {
 
 	ctxReq, cancel := th.tcfg.storeConfig.setRequestContext()
@@ -131,6 +128,7 @@ func (th *transactionHandler) runTransactionCreate(ctx context.Context, info oau
 		}
 		errRET = th.tw.insertTokenData(ctx, refreshData, th.tcfg.RefreshCName)
 		if errRET != nil {
+			log.Println("T3: Failed insert refreshData to RefreshCName: ", err)
 			err = th.tw.removeBasicData(ctx, basicData.ID)
 			if err != nil {
 				// basicData will be remove when service restart
@@ -171,11 +169,6 @@ func (th *transactionHandler) runTransactionCreate(ctx context.Context, info oau
 	}
 
 	return nil
-
-	// TODO set a retry on all methods
-	// if retry fail ping the db
-	// if ping fail crash the server for it to restart
-
 }
 
 type TransactionWorker interface {
@@ -189,6 +182,7 @@ type TransactionWorker interface {
 	cleanupTransactionsData(ctx context.Context, service string) error
 }
 
+// transactionWorker execute transaction's actions
 type transactionWorker struct {
 	tc     *TokenConfig
 	client *mongo.Client
@@ -242,7 +236,7 @@ func (tw *transactionWorker) insertBasicTransactionData(ctx context.Context, txn
 	return err
 }
 
-// InsertTokenData insert accessData and refreshData
+// insertTokenData insert accessData and refreshData
 func (tw *transactionWorker) insertTokenData(ctx context.Context, tokenData tokenData, collectionName string) error {
 	_, err := tw.getCollection(collectionName).InsertOne(ctx, tokenData)
 	if err != nil {
@@ -265,7 +259,7 @@ func (tw *transactionWorker) removeTokenData(ctx context.Context, tokenDataID, c
 	return err
 }
 
-// InsertTokenData insert accessData and refreshData
+// insertTokenTransactionData insert accessData and refreshData to the TxnCName db
 func (tw *transactionWorker) insertTokenTransactionData(ctx context.Context, txnData transactionData) error {
 	_, err := tw.getCollection(tw.tc.TxnCName).InsertOne(ctx, txnData)
 	if err != nil {
@@ -279,6 +273,7 @@ func (tw *transactionWorker) insertTokenTransactionData(ctx context.Context, txn
 	return err
 }
 
+// removeTransactionData remove transaction's tuple
 func (tw *transactionWorker) removeTransactionData(ctx context.Context, tokenDataID string) error {
 	_, err := tw.getCollection(tw.tc.TxnCName).DeleteOne(ctx, bson.D{{Key: "_id", Value: tokenDataID}})
 	if err != nil {
@@ -288,6 +283,11 @@ func (tw *transactionWorker) removeTransactionData(ctx context.Context, tokenDat
 	return err
 }
 
+/*
+* cleanupTransactionsData is called when the service start
+* if some entries remain in the txn db it means some transaction failed without having been cleaned
+* in this case clean the entries in the basicToken or/and accessToken then clean the TxnCName
+**/
 func (tw *transactionWorker) cleanupTransactionsData(ctx context.Context, service string) (err error) {
 	filter := bson.M{"Service": service}
 	cursor, err := tw.getCollection(tw.tc.TxnCName).Find(ctx, filter)

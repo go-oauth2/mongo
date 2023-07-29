@@ -15,7 +15,13 @@ func TestTokenStoreWithTimeout(t *testing.T) {
 	Convey("Test mongodb token store", t, func() {
 
 		storeConfig := NewStoreConfig(1, 5)
-		store := NewTokenStore(NewConfigNonReplicaSet(url, dbName, username, password, service), storeConfig)
+
+		var store *TokenStore
+		if !isReplicaSet {
+			store = NewTokenStore(NewConfigNonReplicaSet(url, dbName, username, password, service), storeConfig)
+		} else {
+			store = NewTokenStore(NewConfigReplicaSet(url, dbName), storeConfig)
+		}
 
 		Convey("Test authorization code store", func() {
 			info := &models.Token{
@@ -114,7 +120,12 @@ func TestTokenStoreWithTimeout(t *testing.T) {
 
 func TestTokenStore(t *testing.T) {
 	Convey("Test mongodb token store", t, func() {
-		store := NewTokenStore(NewConfigNonReplicaSet(url, dbName, username, password, service))
+		var store *TokenStore
+		if !isReplicaSet {
+			store = NewTokenStore(NewConfigNonReplicaSet(url, dbName, username, password, service))
+		} else {
+			store = NewTokenStore(NewConfigReplicaSet(url, dbName))
+		}
 
 		Convey("Test authorization code store", func() {
 			info := &models.Token{

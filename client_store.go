@@ -45,6 +45,7 @@ func NewDefaultStoreConfig(db, service string, isReplicasSet bool) *StoreConfig 
 	}
 }
 
+// setRequestContext set a WithTimeout or Background context
 func (sc *StoreConfig) setRequestContext() (context.Context, context.CancelFunc) {
 	ctx := context.Background()
 	if sc.requestTimeout > 0 {
@@ -55,11 +56,12 @@ func (sc *StoreConfig) setRequestContext() (context.Context, context.CancelFunc)
 	return nil, func() {}
 }
 
+// setTransactionCreateContext is specific to the transaction(if not a replicaSet)
 func (sc *StoreConfig) setTransactionCreateContext() (context.Context, context.CancelFunc) {
 	ctx := context.Background()
 	if sc.requestTimeout > 0 {
-		// at max TransactionCreate run 7 requests
-		timeout := time.Duration(sc.requestTimeout*7) * time.Second
+		// at max TransactionCreate run 9 requests
+		timeout := time.Duration(sc.requestTimeout*9) * time.Second
 		return context.WithTimeout(ctx, timeout)
 	}
 	return nil, func() {}
@@ -82,7 +84,6 @@ func NewDefaultClientConfig(strCfgs *StoreConfig) *ClientConfig {
 
 // NewClientStore create a client store instance based on mongodb
 func NewClientStore(cfg *Config, scfgs ...*StoreConfig) *ClientStore {
-
 	clientOptions := options.Client().ApplyURI(cfg.URL)
 	ctx := context.TODO()
 	ctxPing := context.TODO()

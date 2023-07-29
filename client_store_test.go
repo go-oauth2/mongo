@@ -8,11 +8,17 @@ import (
 	. "github.com/smartystreets/goconvey/convey"
 )
 
-// shut the the down the database, test should fail within a second
+// shut down the database, test should fail within a second
 func TestClientStoreWithTimeout(t *testing.T) {
 
 	storeConfig := NewStoreConfig(1, 1)
-	store := NewClientStore(NewConfigNonReplicaSet(url, dbName, username, password, service), storeConfig)
+
+	var store *ClientStore
+	if !isReplicaSet {
+		store = NewClientStore(NewConfigNonReplicaSet(url, dbName, username, password, service), storeConfig)
+	} else {
+		store = NewClientStore(NewConfigReplicaSet(url, dbName), storeConfig)
+	}
 
 	client := &models.Client{
 		ID:     "id",
@@ -72,7 +78,12 @@ func TestClientStoreWithTimeout(t *testing.T) {
 }
 
 func TestClientStore(t *testing.T) {
-	store := NewClientStore(NewConfigNonReplicaSet(url, dbName, username, password, service))
+	var store *ClientStore
+	if !isReplicaSet {
+		store = NewClientStore(NewConfigNonReplicaSet(url, dbName, username, password, service))
+	} else {
+		store = NewClientStore(NewConfigReplicaSet(url, dbName))
+	}
 
 	client := &models.Client{
 		ID:     "id",

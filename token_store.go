@@ -3,7 +3,6 @@ package mongo
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"time"
 
@@ -41,12 +40,7 @@ func NewDefaultTokenConfig(strConfig *StoreConfig) *TokenConfig {
 }
 
 // NewTokenStore create a token store instance based on mongodb
-// func NewTokenStore(cfg *Config, tcfgs ...*TokenConfig) (store *TokenStore) {
 func NewTokenStore(cfg *Config, scfgs ...*StoreConfig) (store *TokenStore) {
-	// clientOptions := options.Client().ApplyURI(cfg.URL).SetWriteConcern(writeconcern.New(writeconcern.WMajority()))
-
-	fmt.Println("See url: ", cfg.URL)
-
 	clientOptions := options.Client().ApplyURI(cfg.URL)
 	ctx := context.TODO()
 	ctxPing := context.TODO()
@@ -91,8 +85,6 @@ func NewTokenStore(cfg *Config, scfgs ...*StoreConfig) (store *TokenStore) {
 
 // NewTokenStoreWithSession create a token store instance based on mongodb
 func NewTokenStoreWithSession(client *mongo.Client, cfg *Config, scfgs ...*StoreConfig) (store *TokenStore) {
-	// func NewTokenStoreWithSession(client *mongo.Client, cfg *Config) (store *TokenStore) {
-
 	strCfgs := NewDefaultStoreConfig(cfg.DB, cfg.Service, cfg.IsReplicaSet)
 
 	ts := &TokenStore{
@@ -205,7 +197,6 @@ func (ts *TokenStore) Create(ctx context.Context, info oauth2.TokenInfo) (err er
 	}
 
 	id := primitive.NewObjectID().Hex()
-	// fmt.Println("the id: ", id)
 
 	// Create the basicData document
 	basicData := basicData{
@@ -221,7 +212,7 @@ func (ts *TokenStore) Create(ctx context.Context, info oauth2.TokenInfo) (err er
 		ExpiredAt: aexp,
 	}
 
-	// if context is defined manually, increase it for the transaction
+	// if context is defined, increase it for the transaction
 	ctxTxn, cancel := ts.tcfg.storeConfig.setTransactionCreateContext()
 	defer cancel()
 	if ctxTxn != nil {
@@ -283,6 +274,12 @@ func (ts *TokenStore) Create(ctx context.Context, info oauth2.TokenInfo) (err er
 
 // RemoveByCode use the authorization code to delete the token information
 func (ts *TokenStore) RemoveByCode(ctx context.Context, code string) (err error) {
+	ctxReq, cancel := ts.tcfg.storeConfig.setRequestContext()
+	defer cancel()
+	if ctxReq != nil {
+		ctx = ctxReq
+	}
+
 	_, err = ts.c(ts.tcfg.BasicCName).DeleteOne(ctx, bson.D{{Key: "_id", Value: code}})
 	if err != nil {
 		log.Println("Error RemoveByCode: ", err)
@@ -292,6 +289,12 @@ func (ts *TokenStore) RemoveByCode(ctx context.Context, code string) (err error)
 
 // RemoveByAccess use the access token to delete the token information
 func (ts *TokenStore) RemoveByAccess(ctx context.Context, access string) (err error) {
+	ctxReq, cancel := ts.tcfg.storeConfig.setRequestContext()
+	defer cancel()
+	if ctxReq != nil {
+		ctx = ctxReq
+	}
+
 	_, err = ts.c(ts.tcfg.AccessCName).DeleteOne(ctx, bson.D{{Key: "_id", Value: access}})
 	if err != nil {
 		log.Println("Error RemoveByAccess: ", err)
@@ -301,6 +304,12 @@ func (ts *TokenStore) RemoveByAccess(ctx context.Context, access string) (err er
 
 // RemoveByRefresh use the refresh token to delete the token information
 func (ts *TokenStore) RemoveByRefresh(ctx context.Context, refresh string) (err error) {
+	ctxReq, cancel := ts.tcfg.storeConfig.setRequestContext()
+	defer cancel()
+	if ctxReq != nil {
+		ctx = ctxReq
+	}
+
 	_, err = ts.c(ts.tcfg.RefreshCName).DeleteOne(ctx, bson.D{{Key: "_id", Value: refresh}})
 	if err != nil {
 		log.Println("Error RemoveByRefresh: ", err)
@@ -309,9 +318,15 @@ func (ts *TokenStore) RemoveByRefresh(ctx context.Context, refresh string) (err 
 }
 
 func (ts *TokenStore) getData(basicID string) (ti oauth2.TokenInfo, err error) {
+	ctx := context.Background()
+	ctxReq, cancel := ts.tcfg.storeConfig.setRequestContext()
+	defer cancel()
+	if ctxReq != nil {
+		ctx = ctxReq
+	}
 
 	var bd basicData
-	err = ts.c(ts.tcfg.BasicCName).FindOne(context.TODO(), bson.D{{Key: "_id", Value: basicID}}).Decode(&bd)
+	err = ts.c(ts.tcfg.BasicCName).FindOne(ctx, bson.D{{Key: "_id", Value: basicID}}).Decode(&bd)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			return nil, nil
@@ -329,8 +344,15 @@ func (ts *TokenStore) getData(basicID string) (ti oauth2.TokenInfo, err error) {
 }
 
 func (ts *TokenStore) getBasicID(cname, token string) (basicID string, err error) {
+	ctx := context.Background()
+	ctxReq, cancel := ts.tcfg.storeConfig.setRequestContext()
+	defer cancel()
+	if ctxReq != nil {
+		ctx = ctxReq
+	}
+
 	var td tokenData
-	err = ts.c(cname).FindOne(context.TODO(), bson.D{{Key: "_id", Value: token}}).Decode(&td)
+	err = ts.c(cname).FindOne(ctx, bson.D{{Key: "_id", Value: token}}).Decode(&td)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			return

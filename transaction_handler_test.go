@@ -43,7 +43,14 @@ func TestTransaction(t *testing.T) {
 	}
 
 	storeConfig := NewStoreConfig(1, 5)
-	store := NewTokenStore(NewConfigNonReplicaSet(url, dbName, username, password, service), storeConfig)
+
+	var store *TokenStore
+	if !isReplicaSet {
+		store = NewTokenStore(NewConfigNonReplicaSet(url, dbName, username, password, service), storeConfig)
+	} else {
+		t.Skip("Skipping the test as it is a replica set.")
+	}
+
 	store.txnHandler.tw = &mockTransactionWorker{}
 
 	Convey("Test mongodb token store", t, func() {
@@ -230,6 +237,7 @@ func TestTransaction(t *testing.T) {
 	})
 }
 
+// mock the transactionWorker
 type mockTransactionWorker struct{}
 
 func (mt *mockTransactionWorker) insertBasicData(ctx context.Context, basicData basicData) error {
