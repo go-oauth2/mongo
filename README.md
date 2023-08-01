@@ -11,24 +11,70 @@ $ go get -u -v gopkg.in/go-oauth2/mongo.v3
 ## Usage
 
 ``` go
-package main
-
-import (
-	"gopkg.in/go-oauth2/mongo.v3"
-	"gopkg.in/oauth2.v3/manage"
+import(
+    "github.com/go-oauth2/oauth2/v4/manage"
+    "github.com/go-oauth2/oauth2/v4/server"
+    mongo "gopkg.in/go-oauth2/mongo.v3"    
 )
 
-func main() {
-	manager := manage.NewDefaultManager()
+func main(){
+    manager := manage.NewDefaultManager()
+
+    /*
+	* only for a MongoDB replicaSet deployment
+    * Using a replicaSet is recommended as it allows for MongoDB's native support for transactions
+    **/
+	// mongoConf := mongo.NewConfigReplicaSet(
+	// 	"mongodb://localhost:27017,localhost:28017,localhost:29017/?replicaSet=myReplicaSet",
+	// 	"oauth2",
+	// )
+
+	// set connectionTimeout(7s) and the requestsTimeout(5s) // is optional
+	storeConfigs := mongo.NewStoreConfig(7, 5)
+
+    /*
+	* for a single mongoDB node
+	* if the oauth2 service is deployed with more than one instance
+	* each mongoConf should have unique serviceName
+    **/
+	mongoConf := mongo.NewConfigNonReplicaSet(
+		"mongodb://127.0.0.1:27017",
+		"oauth2",   // database name
+		"admin",    // username to authenticate with db
+		"password", // password to authenticate with db
+		"serviceName",
+	)
 
 	// use mongodb token store
 	manager.MapTokenStorage(
-		mongo.NewTokenStore(mongo.NewConfig(
-			"mongodb://127.0.0.1:27017",
-			"oauth2",
-		)),
+		mongo.NewTokenStore(mongoConf, storeConfigs), // with timeout
+		// mongo.NewTokenStore(mongoConf), // no timeout
 	)
-	// ...
+
+	clientStore := mongo.NewClientStore(mongoConf, storeConfigs) // with timeout
+	// clientStore := mongo.NewClientStore(mongoConf) // no timeout
+
+	manager.MapClientStorage(clientStore)
+
+	// register a service
+	clientStore.Create(&models.Client{
+		ID:     idvar,
+		Secret: secretvar,
+		Domain: domainvar,
+		UserID: "frontend",
+	})
+
+	// register a second service
+	clientStore.Create(&models.Client{
+		ID:     idPreorder,
+		Secret: secretPreorder,
+		Domain: domainPreorder,
+		UserID: "prePost",
+	})
+
+	srv := server.NewServer(server.NewConfig(), manager)
+
+    // ...
 }
 ```
 
