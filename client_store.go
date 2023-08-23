@@ -185,13 +185,17 @@ func (cs *ClientStore) Create(info oauth2.ClientInfo) (err error) {
 
 	_, err = collection.InsertOne(ctx, entity)
 	if err != nil {
-		if !mongo.IsDuplicateKeyError(err) {
-			log.Fatal(err)
+		// if an entry already exist, delete it and create a new one
+		if mongo.IsDuplicateKeyError(err) {
+			err = cs.RemoveByID(entity.ID)
+			if err != nil {
+				log.Fatal(err)
+			}
+			return cs.Create(info)
 		} else {
-			return nil
+			log.Fatal(err)
 		}
 	}
-
 	return
 }
 
