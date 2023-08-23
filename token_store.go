@@ -160,6 +160,7 @@ func (ts *TokenStore) c(name string) *mongo.Collection {
 
 // Create create and store the new token information
 func (ts *TokenStore) Create(ctx context.Context, info oauth2.TokenInfo) (err error) {
+
 	jv, err := json.Marshal(info)
 	if err != nil {
 		return
@@ -340,6 +341,7 @@ func (ts *TokenStore) getData(basicID string) (ti oauth2.TokenInfo, err error) {
 		return
 	}
 	ti = &tm
+
 	return
 }
 
