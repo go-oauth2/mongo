@@ -355,7 +355,7 @@ func (ts *TokenStore) getBasicID(cname, token string) (basicID string, err error
 	err = ts.c(cname).FindOne(ctx, bson.D{{Key: "_id", Value: token}}).Decode(&td)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
-			return
+			return "", nil
 		}
 		return
 	}
